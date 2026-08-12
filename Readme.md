@@ -1,3 +1,26 @@
+# v86 — Windows 8.1 compatible fork
+
+This fork builds on [DixelU/v86](https://github.com/DixelU/v86)'s `nx-support-v2`
+branch, which adds NX bit (no-execute page protection) support — a hard
+requirement for booting Windows 8 and newer. On top of that, this fork fixes
+a crash that prevented Windows 8.1 from completing setup:
+
+- **NX bit / PAE paging**: page directory/table entries now enforce the NX
+  bit (`EFER.NXE`, CPUID leaf `0x80000001`), instead of silently ignoring it.
+- **CRC32 (SSE4.2) instruction**: the `0F 38`/`0F 3A` opcode maps
+  (SSSE3/SSE4.1/SSE4.2) were entirely unimplemented in upstream v86, so any
+  execution of `CRC32` (`F2 0F 38 F0`/`F1`) raised an invalid-opcode fault.
+  Windows 8.1 executes this during device enumeration ("Getting devices
+  ready"), and the fault cascaded into a `HAL_INITIALIZATION_FAILED` (0x5C)
+  bugcheck. This fork implements real CRC32-C (Castagnoli) support for the
+  r8/r16/r32 source forms.
+- Misc: `wasm-opt` enabled in the release build, non-fatal handling of
+  unimplemented ATA commands in debug builds, and a trimmed-down start page.
+
+With these changes, Windows 8.1 installs and boots to a working desktop.
+
+---
+
 [![Join the chat at https://gitter.im/copy/v86](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/copy/v86) or #v86 on [irc.libera.chat](https://libera.chat/)
 
 v86 emulates an x86-compatible CPU and hardware. Machine code is translated to
@@ -5,10 +28,13 @@ WebAssembly modules at runtime in order to achieve decent performance. Here's a
 list of emulated hardware:
 
 - An x86-compatible CPU. The instruction set is around Pentium 4 level,
-  including full SSE3 support. Some features are missing, in particular:
+  including full SSE3 support, NX bit (no-execute) enforcement, and the
+  CRC32 (SSE4.2) instruction. Some features are missing, in particular:
   - Task gates, far calls in protected mode
   - Some 16 bit protected mode features
   - Single stepping (trap flag, debug registers)
+  - Most SSSE3/SSE4.1 instructions (the `0F 38`/`0F 3A` opcode maps), other
+    than CRC32
   - Some exceptions, especially floating point and SSE
   - Multicore
   - 64-bit extensions
