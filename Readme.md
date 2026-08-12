@@ -1,5 +1,10 @@
 # v86 — Windows 8.1 compatible fork
 
+All credit for the emulator itself goes to [copy/v86](https://github.com/copy/v86)
+(the original v86 project by Fabian, aka "copy", and its many contributors) —
+an x86 PC emulator that JIT-compiles guest machine code to WebAssembly and
+runs entirely in the browser. This repo wouldn't exist without their work.
+
 This fork builds on [DixelU/v86](https://github.com/DixelU/v86)'s `nx-support-v2`
 branch, which adds NX bit (no-execute page protection) support — a hard
 requirement for booting Windows 8 and newer. On top of that, this fork fixes
