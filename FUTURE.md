@@ -100,20 +100,19 @@ Rough shape of what it would take:
   (nothing claims long mode support), so this also means auditing anywhere
   compatibility-mode / long-mode CPUID inputs are assumed to correlate.
 - Windows 11's own extra requirements on top of that. The actual minimum
-  *spec* bump over Windows 10 is RAM and core count — Microsoft lists 4 GB
-  RAM minimum for 11 vs. 2 GB for 10, and a 2-core (or more) 64-bit CPU is a
-  hard minimum requirement for 11, so a v86 VM needs `-smp 2`-equivalent
-  multi-core presentation, not just enough RAM. v86 has no real multicore
-  support today (called out in the upstream Readme's gap list too), so this
-  may end up being its own small sub-problem — whether Windows 11 setup
-  actually requires functioning SMP or just a CPU that *reports* 2+ logical
-  cores via CPUID is worth checking early, since only the latter would be
-  cheap to fake. TPM 2.0 and Secure Boot are a separate category: platform
-  *gating* checks rather than resource requirements, and normally
+  *spec* bump over Windows 10 is RAM — Microsoft lists 4 GB minimum for 11
+  vs. 2 GB for 10, so a v86 VM needs to be provisioned accordingly. Core
+  count is listed on Microsoft's spec sheet too (2+ cores), but it's not
+  something Setup hard-enforces the way it does the CPU/RAM/storage floor —
+  more a "heavily recommended for it to actually be usable" than a strict
+  blocker. Since v86 has no real multicore support today (called out in the
+  upstream Readme's gap list too), worth checking early whether Windows 11
+  setup even cares whether the reported core count is real vs. just
+  something CPUID claims. TPM 2.0 and Secure Boot are a separate category:
+  platform *gating* checks rather than resource requirements, and normally
   bypassable for VM installs (registry edits during setup, or images
   pre-modified to skip them) — worth tracking as a compatibility item, but
-  not the thing that makes 11 need
-  more from the emulator itself.
+  not the thing that makes 11 need more from the emulator itself.
 
 This is realistically a multi-month project on its own, done by someone
 comfortable with x86-64 architecture internals — not a bug-hunting loop like
