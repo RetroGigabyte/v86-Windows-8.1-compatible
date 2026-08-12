@@ -157,3 +157,34 @@ instead:
    work is mostly Windows 11-specific gating (TPM/Secure Boot), not core
    CPU correctness — a much smaller, better-isolated problem than debugging
    long mode and Windows 11 compatibility at the same time.
+
+## Speeding up the CPU
+
+Separate axis from OS compatibility — this is about making whatever already
+boots (8.1 today, 10/11 eventually) run faster, which matters more as target
+OSes get heavier. Already done as of this fork: `wasm-opt -O2` enabled in
+the release build (`WASM_OPT=true` in the Makefile), which shrank
+`v86.wasm` by roughly a third. Beyond that, roughly in order of
+likely-cheapest-to-try first:
+
+- **Profile before guessing.** The Cargo `profiler` feature
+  (`make with-profiler` / `debug-with-profiler` targets, `docs/profiling.md`)
+  gives real per-function timing inside the JIT. Worth running against an
+  actual Windows 8.1 boot to see where time genuinely goes before assuming
+  it's "the JIT" or "the NX checks" — the NX/CRC32 work added real per-access
+  overhead (extra TLB bit checks, instruction-fetch vs. data-read
+  distinction in `do_page_walk`) that's never been profiled to see if it's
+  actually significant or just theoretically slower.
+- **JIT coverage.** `stat::RUN_INTERPRETED_*` counters (see `cycle_internal`
+  in `src/rust/cpu/cpu.rs`) track how often execution falls back to the
+  slow interpreted path instead of compiled code — differing state flags,
+  pages near the end of a page, etc. Worth checking what fraction of a
+  Windows boot runs interpreted vs. JIT-compiled.
+- **Multicore, again.** Beyond being a Windows 11 spec item, real SMP would
+  be a straightforward win for anything that's actually parallel (Windows
+  installs/updates do use multiple threads), independent of raw per-core
+  speed.
+- **Browser choice matters today, without any code changes.** V8-based
+  browsers (Chrome/Edge) JIT-compile and execute the wasm noticeably faster
+  than JavaScriptCore/Safari for this kind of hot, branch-heavy code — worth
+  stating explicitly for anyone benchmarking or comparing results.
