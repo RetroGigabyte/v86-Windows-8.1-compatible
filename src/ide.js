@@ -1324,7 +1324,7 @@ IDEInterface.prototype.ata_command = function(cmd)
             break;
 
         default:
-            dbg_assert(false, `${this.name}: error: unimplemented ATA command ${h(cmd)}: ABORT [${this.capture_regs()}]`, LOG_DISK);
+            dbg_log(`${this.name}: error: unimplemented ATA command ${h(cmd)}: ABORT [${this.capture_regs()}]`, LOG_DISK);
             this.ata_abort_command();
             break;
     }

@@ -5,8 +5,86 @@ unsafe fn undefined_instruction() {
     trigger_ud()
 }
 unsafe fn unimplemented_sse() {
-    dbg_assert!(false, "Unimplemented SSE instruction");
+    let start = *previous_ip;
+    let b0 = safe_read8(start).unwrap_or(-1);
+    let b1 = safe_read8(start + 1).unwrap_or(-1);
+    let b2 = safe_read8(start + 2).unwrap_or(-1);
+    let b3 = safe_read8(start + 3).unwrap_or(-1);
+    let b4 = safe_read8(start + 4).unwrap_or(-1);
+    dbg_log!(
+        "Unimplemented SSE instruction at eip={:#010x} bytes={:02x} {:02x} {:02x} {:02x} {:02x}",
+        start,
+        b0,
+        b1,
+        b2,
+        b3,
+        b4
+    );
     trigger_ud()
+}
+
+unsafe fn crc32c_update_byte(crc: i32, byte: i32) -> i32 {
+    let mut crc = (crc as u32) ^ (byte as u32 & 0xFF);
+    let mut i = 0;
+    while i < 8 {
+        if crc & 1 != 0 {
+            crc = (crc >> 1) ^ 0x82F63B78;
+        }
+        else {
+            crc >>= 1;
+        }
+        i += 1;
+    }
+    crc as i32
+}
+
+/// CRC32 r32, r/m8 / r/m16 / r/m32 (SSE4.2, mandatory F2 prefix).
+/// Manually decoded here since the 0F 38 opcode map is not covered by the
+/// generated interpreter/JIT tables (see gen/x86_table.js, `skip: 1`).
+unsafe fn instr_0F38_crc32(modrm_byte: i32, is_8bit_source: bool) -> OrPageFault<()> {
+    let reg = modrm_byte >> 3 & 7;
+    let md = modrm_byte >> 6 & 3;
+    let rm = modrm_byte & 7;
+
+    let mut crc = read_reg32(reg);
+
+    if is_8bit_source {
+        let value = if md == 3 {
+            read_reg8(rm)
+        }
+        else {
+            let addr = modrm_resolve(modrm_byte)?;
+            safe_read8(addr)?
+        };
+        crc = crc32c_update_byte(crc, value);
+    }
+    else if *prefixes & prefix::PREFIX_MASK_OPSIZE != 0 {
+        let value = if md == 3 {
+            read_reg16(rm)
+        }
+        else {
+            let addr = modrm_resolve(modrm_byte)?;
+            safe_read16(addr)?
+        };
+        crc = crc32c_update_byte(crc, value & 0xFF);
+        crc = crc32c_update_byte(crc, value >> 8 & 0xFF);
+    }
+    else {
+        let value = if md == 3 {
+            read_reg32(rm)
+        }
+        else {
+            let addr = modrm_resolve(modrm_byte)?;
+            safe_read32s(addr)?
+        };
+        crc = crc32c_update_byte(crc, value & 0xFF);
+        crc = crc32c_update_byte(crc, value >> 8 & 0xFF);
+        crc = crc32c_update_byte(crc, value >> 16 & 0xFF);
+        crc = crc32c_update_byte(crc, value >> 24 & 0xFF);
+    }
+
+    write_reg32(reg, crc);
+    Ok(())
 }
 
 use crate::config;
@@ -22,6 +100,8 @@ use crate::cpu::arith::{
 use crate::cpu::cpu::*;
 use crate::cpu::fpu::fpu_set_tag_word;
 use crate::cpu::global_pointers::*;
+use crate::paging::OrPageFault;
+use crate::prefix;
 use crate::cpu::misc_instr::{
     adjust_stack_reg, bswap, cmovcc16, cmovcc32, fxrstor, fxsave, get_stack_pointer, jmpcc16,
     jmpcc32, push16, push32_sreg, setcc_mem, setcc_reg, test_b, test_be, test_l, test_le, test_o,
@@ -1404,7 +1484,28 @@ pub unsafe fn instr_0F37() {
     undefined_instruction();
 }
 #[no_mangle]
-pub unsafe fn instr_0F38() { unimplemented_sse(); }
+pub unsafe fn instr_0F38() {
+    let start = *previous_ip;
+    let sub_opcode = match read_imm8() {
+        Ok(b) => b,
+        Err(()) => return,
+    };
+    let modrm_byte = match read_imm8() {
+        Ok(b) => b,
+        Err(()) => return,
+    };
+
+    if (sub_opcode == 0xF0 || sub_opcode == 0xF1) && *prefixes & prefix::PREFIX_F2 != 0 {
+        // CRC32 (SSE4.2)
+        if instr_0F38_crc32(modrm_byte, sub_opcode == 0xF0).is_err() {
+            return;
+        }
+        return;
+    }
+
+    *instruction_pointer = start;
+    unimplemented_sse();
+}
 #[no_mangle]
 pub unsafe fn instr_0F39() { unimplemented_sse(); }
 #[no_mangle]

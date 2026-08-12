@@ -17,7 +17,7 @@ ifeq ($(STRIP_DEBUG),true)
 STRIP_DEBUG_FLAG=--v86-strip-debug
 endif
 
-WASM_OPT ?= false
+WASM_OPT ?= true
 
 default: build/v86-debug.wasm
 all: build/v86_all.js build/libv86.js build/libv86.mjs build/v86.wasm
