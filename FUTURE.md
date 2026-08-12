@@ -80,6 +80,13 @@ This is a different category of problem, not an extension of the 8.1/10
 work. Windows 11 has no 32-bit edition — there's no fallback ISO to reach
 for — so the CPU has to actually support long mode.
 
+Put simply, this is v86's emulated CPU generation jumping from roughly
+Pentium 4-level (32-bit only, single core, SSE2/SSE3 — the upstream Readme's
+own description) to roughly Core 2 Duo-level: Intel's first mainstream
+64-bit *and* real dual-core consumer CPU. Both properties matter for
+Windows 11 (long mode for the OS to boot at all, a second core because it's
+heavily recommended), and neither exists in v86 today.
+
 v86 has **zero 64-bit support today**: no long mode, no 4-level (or 5-level)
 paging, no `R8`-`R15` / 64-bit register file, no 64-bit instruction encoding
 (REX prefixes, RIP-relative addressing, etc). This is called out as a known
