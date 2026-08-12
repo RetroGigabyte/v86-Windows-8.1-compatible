@@ -33,6 +33,28 @@ requirements. The blockers are narrower but there are likely several of them:
   32-bit installer ISOs around the 20H2/21H1 era, so testing means an older
   or repacked ISO, same as the "Lite" image used for the 8.1 work here.
 
+### Why bother — Windows 10 is already EOL (Oct 2025)
+
+Worth doing anyway, because the point isn't Windows 10 itself, it's what can
+still run inside it — Steam, Minecraft, Chrome, etc. But that's eroding too,
+worth knowing going in:
+
+- **Steam**: the client itself is still a 32-bit binary, so it should
+  install and run — but Valve dropped 32-bit *OS* support on Linux/macOS
+  years ago, and an increasing number of individual games require a 64-bit
+  OS even where the client doesn't.
+- **Chrome**: still ships 32-bit Windows builds, so this one's probably fine
+  for a while yet.
+- **Minecraft**: Java Edition can run under a 32-bit JVM, but modern
+  versions lean on LWJGL/rendering libraries that increasingly assume
+  64-bit. Bedrock Edition is UWP and x64-only regardless.
+
+None of this changes the emulator work itself — 32-bit Windows 10 boots or
+it doesn't, independent of what runs inside it — but "Steam/Minecraft/Chrome
+work great on 32-bit Windows 10" is trending toward "worked, for a while,"
+not a stable target. Worth remembering when deciding what success looks
+like once it boots.
+
 ### Suggested approach
 
 Same loop that found the CRC32 bug:
@@ -52,7 +74,7 @@ Same loop that found the CRC32 bug:
 
 Expect this to take several iterations, not one.
 
-## Windows 11 (x86-64)
+## x86-64 (long mode) — needed for Windows 11
 
 This is a different category of problem, not an extension of the 8.1/10
 work. Windows 11 has no 32-bit edition — there's no fallback ISO to reach
@@ -85,3 +107,32 @@ This is realistically a multi-month project on its own, done by someone
 comfortable with x86-64 architecture internals — not a bug-hunting loop like
 the 8.1/10 work. Worth treating as a separate effort with its own design
 pass, not something to bolt onto this fork incrementally.
+
+### Validation order: Linux x64 → Windows 10 x64 → Windows 11
+
+Don't point freshly-written long mode support at Windows 11 first. Windows
+is the worst possible feedback loop for debugging new CPU architecture
+support — heavy boot chain, driver signing, TPM/Secure Boot checks, and (per
+the 8.1 investigation) a habit of silently relying on instructions/features
+that only reveal themselves as fatal bugchecks deep into setup. Stage it
+instead:
+
+1. **A minimal x64 Linux kernel/initramfs first** (e.g. a Buildroot image,
+   similar to what upstream v86 already uses for some 32-bit Linux demos).
+   Linux is far more forgiving to boot, has verbose serial console output
+   instead of opaque bugchecks, and a minimal build touches a much smaller
+   slice of the new long-mode code than a full desktop OS does. This is
+   where the bulk of "does the register file/paging/decode actually work at
+   all" bugs should get caught, with fast, legible iteration — exactly the
+   kind of tight loop the CRC32 fix depended on.
+2. **Windows 10 x64** next. Same OS family and driver model Windows 11
+   uses, but without the TPM/Secure Boot gate, so it isolates "does long
+   mode work under a real Windows kernel" from "does the VM satisfy
+   Windows 11's extra platform requirements." Also directly useful on its
+   own terms (Steam/Chrome/etc. compatibility is much less of a concern on
+   x64 than on 32-bit, per the section above).
+3. **Windows 11** last, once long mode is already proven solid under both
+   Linux and Windows 10 x64. At that point the remaining work is mostly
+   Windows 11-specific gating (TPM/Secure Boot expectations), not core CPU
+   correctness — a much smaller, better-isolated problem than debugging
+   long mode and Windows 11 compatibility at the same time.
