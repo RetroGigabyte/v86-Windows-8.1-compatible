@@ -19,6 +19,8 @@ a crash that prevented Windows 8.1 from completing setup:
 
 With these changes, Windows 8.1 installs and boots to a working desktop.
 
+![Windows 8.1 Pro running in v86](docs/screenshots/windows81-desktop.png)
+
 > **AI Disclaimer:** My changes on top of the NX bit fork (the CRC32 fix and
 > related work described above) were developed with the assistance of
 > Claude AI. I believe AI-written code should be open source to benefit
