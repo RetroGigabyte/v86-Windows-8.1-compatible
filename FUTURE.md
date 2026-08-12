@@ -99,9 +99,14 @@ Rough shape of what it would take:
 - CPUID leaf 0x80000001 already advertises the LM bit as absent-safe
   (nothing claims long mode support), so this also means auditing anywhere
   compatibility-mode / long-mode CPUID inputs are assumed to correlate.
-- Windows 11's own extra requirements on top of that (TPM/Secure Boot
-  checks, which are normally bypassable for VM installs, and generally
-  heavier resource expectations).
+- Windows 11's own extra requirements on top of that. The actual minimum
+  *spec* bump over Windows 10 is RAM — Microsoft lists 4 GB minimum for 11
+  vs. 2 GB for 10, so a v86 VM needs to be provisioned accordingly. TPM 2.0
+  and Secure Boot are a separate category: platform *gating* checks rather
+  than resource requirements, and normally bypassable for VM installs
+  (registry edits during setup, or images pre-modified to skip them) — worth
+  tracking as a compatibility item, but not the thing that makes 11 need
+  more from the emulator itself.
 
 This is realistically a multi-month project on its own, done by someone
 comfortable with x86-64 architecture internals — not a bug-hunting loop like
@@ -126,13 +131,16 @@ instead:
    all" bugs should get caught, with fast, legible iteration — exactly the
    kind of tight loop the CRC32 fix depended on.
 2. **Windows 10 x64** next. Same OS family and driver model Windows 11
-   uses, but without the TPM/Secure Boot gate, so it isolates "does long
-   mode work under a real Windows kernel" from "does the VM satisfy
-   Windows 11's extra platform requirements." Also directly useful on its
-   own terms (Steam/Chrome/etc. compatibility is much less of a concern on
-   x64 than on 32-bit, per the section above).
+   uses, but without the TPM/Secure Boot gate, and a lower minimum RAM spec
+   (2 GB vs. 11's 4 GB) — lighter to provision and easier to boot in a v86
+   VM while long mode support is still being shaken out. This isolates
+   "does long mode work under a real Windows kernel" from Windows 11's
+   extra platform checks. Also directly useful on its own terms
+   (Steam/Chrome/etc. compatibility is much less of a concern on x64 than on
+   32-bit, per the section above).
 3. **Windows 11** last, once long mode is already proven solid under both
-   Linux and Windows 10 x64. At that point the remaining work is mostly
-   Windows 11-specific gating (TPM/Secure Boot expectations), not core CPU
-   correctness — a much smaller, better-isolated problem than debugging
+   Linux and Windows 10 x64, and the VM is provisioned with enough RAM
+   (4 GB+) to meet its actual minimum spec. At that point the remaining
+   work is mostly Windows 11-specific gating (TPM/Secure Boot), not core
+   CPU correctness — a much smaller, better-isolated problem than debugging
    long mode and Windows 11 compatibility at the same time.
