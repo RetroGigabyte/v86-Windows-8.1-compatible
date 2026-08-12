@@ -19,6 +19,11 @@ a crash that prevented Windows 8.1 from completing setup:
 
 With these changes, Windows 8.1 installs and boots to a working desktop.
 
+> **AI Disclaimer:** My changes on top of the NX bit fork (the CRC32 fix and
+> related work described above) were developed with the assistance of
+> Claude AI. I believe AI-written code should be open source to benefit
+> everyone and maintain transparency.
+
 ---
 
 [![Join the chat at https://gitter.im/copy/v86](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/copy/v86) or #v86 on [irc.libera.chat](https://libera.chat/)
