@@ -729,6 +729,9 @@ IDEChannel.prototype.dma_write_command8 = function(value)
 
     this.dma_status |= 1;
 
+    console.error("[diag] DMA start cmd=" + h(this.current_interface.current_command, 2) +
+        " channel=" + (this.current_interface === this.master ? "master" : "slave"));
+
     switch(this.current_interface.current_command)
     {
         case ATA_CMD_READ_DMA:
@@ -746,6 +749,7 @@ IDEChannel.prototype.dma_write_command8 = function(value)
             dbg_log(this.current_interface.name + ": spurious DMA command write, current command: " +
                     h(this.current_interface.current_command), LOG_DISK);
             dbg_log(this.current_interface.name + ": DMA clear status bit 1h, set status bit 2h", LOG_DISK);
+            console.error("[diag] DMA spurious command write, cmd=" + h(this.current_interface.current_command, 2));
             this.dma_status &= ~1;
             this.dma_status |= 2;
             this.push_irq();
@@ -2240,6 +2244,8 @@ IDEInterface.prototype.do_ata_read_sectors_dma = function()
         this.channel.dma_status &= ~1;
         this.current_command = -1;
 
+        console.error("[diag] DMA read complete, byte_count=" + byte_count);
+
         this.report_read_end(byte_count);
 
         this.push_irq();
@@ -2662,8 +2668,12 @@ IDEInterface.prototype.read_buffer = function(start, length, callback)
     const abort = new AbortController();
     this.in_progress_io_ids.set(id, abort);
 
+    console.error("[diag] read_buffer start id=" + id + " start=" + start + " length=" + length);
+
     this.buffer.get(start, length, data =>
     {
+        console.error("[diag] read_buffer callback fired id=" + id);
+
         if(this.cancelled_io_ids.delete(id))
         {
             dbg_assert(!this.in_progress_io_ids.has(id));

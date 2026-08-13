@@ -789,7 +789,9 @@ pub unsafe fn call_interrupt_vector(
     is_software_int: bool,
     error_code: Option<i32>,
 ) {
-    if *protected_mode && matches!(interrupt_nr, 0 | 4 | 5 | 6 | 8 | 10 | 11 | 12 | 13 | 14) {
+    if *protected_mode
+        && matches!(interrupt_nr, 0 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 16 | 17 | 18 | 19)
+    {
         // fault-class exceptions only, protected mode only (real mode reuses
         // these vector numbers for routine IRQs/BIOS calls, not CPU
         // exceptions); logged unconditionally (not gated by dbg_log/DEBUG)

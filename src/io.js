@@ -352,13 +352,13 @@ IO.prototype.port_read8 = function(port_addr)
 {
     var entry = this.ports[port_addr];
 
+    var value = entry.read8.call(entry.device, port_addr);
     if(entry.read8 === this.empty_port_read8 || LOG_ALL_IO)
     {
         console.error(
-            "[diag] read8 port  #" + h(port_addr, 4) + this.get_port_description(port_addr)
+            "[diag] read8 port  #" + h(port_addr, 4) + " -> " + h(value, 2) + this.get_port_description(port_addr)
         );
     }
-    var value = entry.read8.call(entry.device, port_addr);
     dbg_assert(typeof value === "number");
     if(value < 0 || value >= 0x100) dbg_assert(false, "8 bit port returned large value: " + h(port_addr));
     return value;

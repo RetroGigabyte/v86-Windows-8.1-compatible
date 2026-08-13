@@ -109,28 +109,62 @@ instruction:
   PM timer) all match real hardware's actual write-only/read-only design,
   not bugs.
 - After the fix, a full-duration test still sat on the same logo screen
-  for 20+ minutes with no repeating faults — long enough that it's
-  genuinely unclear whether that's a **second**, still-unfound livelock, or
-  just legitimate slowness (a 2.9 GB ESD decompressing under JIT-compiled
-  software emulation). Not yet resolved either way.
+  for 20+ minutes with no repeating faults. Pre-installed Tiny10 via QEMU
+  (same approach that confirmed the 8.1 breakthrough — see the top-level
+  Readme) to separate "Setup itself is slow" from "an already-installed
+  Windows 10 doesn't boot cleanly." **The already-installed disk hit the
+  exact same wall**, with no ESD decompression to blame — confirming this
+  is a second, real, still-open bug, not just slowness.
 
-**Next step in progress**: pre-installing Tiny10 via QEMU (same approach
-that worked for 8.1 — see the top-level Readme) to separate "does Setup
-itself hang" from "does an already-installed Windows 10 boot cleanly" —
-mirrors exactly how the 8.1 breakthrough was confirmed. If the
-already-installed disk also sits on the logo for 20+ minutes, that's much
-stronger evidence of a second real bug (still there without a fresh
-install's disk-heavy Setup work); if it boots fine, the remaining time was
-probably just Setup being slow.
+### The second bug: a page that's never mapped, and likely why
+
+Traced via protected-mode fault-class exception logging (with disassembly
+at the fault site) plus a full I/O-port trace: disk DMA works flawlessly
+(1800+ successful transfers observed) right up until a page fault on a
+fixed virtual address in the `0xF0010000+` range — generic kernel code
+(`MOV CL, [EDX+EAX]`, nothing SSE/NX-related) reading a page whose page
+directory entry is **genuinely, verifiably zero** in guest memory (checked
+directly, not a v86 misread). A write-watchpoint on that exact page-table
+page confirmed **nothing ever attempts to fix it** — no OS fault-handler
+retry, no driver, nothing. All disk activity stops permanently at this
+point. Address, code path (`0F 38`/`SSE` instructions ruled out by direct
+disassembly), and timing are identical across Tiny10 (fresh install and
+pre-installed) and the official Windows 10 32-bit ISO — this is
+deterministic, not flaky.
+
+Best-supported theory: **v86 emulates a PIIX3/i440FX-class chipset**
+(2004-era, Pentium-4-generation PCI/ACPI topology — see `src/pci.js`/
+`src/acpi.js`), but the QEMU install used to produce the comparison disk
+image was `-machine q35` (ICH9-class, 2008-era, Core-2-generation). Same
+SeaBIOS binary in both cases, but a fundamentally different PCI/ACPI
+hardware topology described to it — not an apples-to-apples comparison.
+Windows 10's kernel/HAL increasingly assumes q35/ICH9-class platform
+features (fuller APIC/IOAPIC routing, MSI-capable interrupt delivery,
+newer ACPI resource descriptors) that don't exist on PIIX3-class hardware,
+regardless of how correct the CPU instruction emulation is. This also
+lines up with the historical `copy/v86#86` GitHub issue (Windows XP not
+booting years ago because "the APIC implementation is quite incomplete")
+— that ceiling was raised since, but apparently not all the way to
+q35-class completeness.
+
+**If this theory is right, the fix isn't a targeted patch** — it's adding
+a newer virtual chipset (ICH9/q35-class: new PCI topology, MMCONFIG
+support, more complete IOAPIC) alongside or instead of the current
+PIIX3-class one. That's a substantial feature addition, comparable in
+scope to the x86-64 work below, not an instruction-level bug fix. Worth
+validating the theory further (e.g., diffing SeaBIOS's actual generated
+ACPI tables under v86 vs. under `-machine q35`) before committing to that
+scope of work.
 
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
-disassembly at the fault site, `do_task_switch` tracing, and
-release-build-visible logging for genuinely-unhandled I/O ports (all
-`console_log!`-based, not gated by `dbg_log`/`DEBUG`, so they work in the
-fast release wasm, not just the slow debug build — see
-`call_interrupt_vector`/`do_task_switch` in `src/rust/cpu/cpu.rs` and
-`IO.prototype.port_read8`/`port_write8` etc. in `src/io.js`).
+disassembly at the fault site (`call_interrupt_vector` in
+`src/rust/cpu/cpu.rs`), `do_task_switch` tracing, page-directory-entry
+write-watchpoints (`memory.rs`), DMA-completion tracing (`src/ide.js`),
+and release-build-visible logging for I/O ports, both unhandled
+(`IO.prototype.port_read8`/`port_write8` in `src/io.js`) and full-traffic
+(`LOG_ALL_IO`) — all `console_log!`-based, not gated by `dbg_log`/`DEBUG`,
+so they work in the fast release wasm, not just the slow debug build.
 
 ## x86-64 (long mode) — needed for Windows 11
 
