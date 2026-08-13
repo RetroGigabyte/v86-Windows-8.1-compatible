@@ -1,5 +1,11 @@
 #![allow(non_snake_case)]
 
+// Temporary diagnostic counters for the new SSSE3/SSE4.1 instructions, to
+// check whether they're actually being hit in a hot loop (e.g. a
+// PALIGNR/PSHUFB-based memcpy) during the Tiny10 investigation.
+static mut SSSE3_CALL_COUNT: u64 = 0;
+static mut PALIGNR_CALL_COUNT: u64 = 0;
+
 unsafe fn undefined_instruction() {
     dbg_assert!(false, "Undefined instructions");
     trigger_ud()
@@ -207,6 +213,12 @@ unsafe fn instr_0F38_ssse3_sse41(sub_opcode: i32, modrm_byte: i32) -> OrPageFaul
         _ => return Ok(false),
     }
 
+    SSSE3_CALL_COUNT += 1;
+    let count = SSSE3_CALL_COUNT;
+    if count % 1_000_000 == 0 {
+        dbg_log!("[diag] instr_0F38_ssse3_sse41 call count: {}", count);
+    }
+
     write_xmm_reg128(reg, result);
     Ok(true)
 }
@@ -236,6 +248,12 @@ unsafe fn instr_0F3A_palignr(modrm_byte: i32) -> OrPageFault<()> {
     for i in 0..16u32 {
         let pos = imm8 + i;
         result.u8[i as usize] = if pos < 32 { concat[pos as usize] } else { 0 };
+    }
+
+    PALIGNR_CALL_COUNT += 1;
+    let count = PALIGNR_CALL_COUNT;
+    if count % 1_000_000 == 0 {
+        dbg_log!("[diag] instr_0F3A_palignr call count: {}", count);
     }
 
     write_xmm_reg128(reg, result);

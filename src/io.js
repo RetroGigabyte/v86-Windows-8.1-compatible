@@ -315,9 +315,8 @@ IO.prototype.port_write8 = function(port_addr, data)
 
     if(entry.write8 === this.empty_port_write || LOG_ALL_IO)
     {
-        dbg_log(
-            "write8 port #" + h(port_addr, 4) + " <- " + h(data, 2) + this.get_port_description(port_addr),
-            LOG_IO
+        console.error(
+            "[diag] write8 port #" + h(port_addr, 4) + " <- " + h(data, 2) + this.get_port_description(port_addr)
         );
     }
     return entry.write8.call(entry.device, data);
@@ -329,9 +328,8 @@ IO.prototype.port_write16 = function(port_addr, data)
 
     if(entry.write16 === this.empty_port_write || LOG_ALL_IO)
     {
-        dbg_log(
-            "write16 port #" + h(port_addr, 4) + " <- " + h(data, 4) + this.get_port_description(port_addr),
-            LOG_IO
+        console.error(
+            "[diag] write16 port #" + h(port_addr, 4) + " <- " + h(data, 4) + this.get_port_description(port_addr)
         );
     }
     return entry.write16.call(entry.device, data);
@@ -343,9 +341,8 @@ IO.prototype.port_write32 = function(port_addr, data)
 
     if(entry.write32 === this.empty_port_write || LOG_ALL_IO)
     {
-        dbg_log(
-            "write32 port #" + h(port_addr, 4) + " <- " + h(data >>> 0, 8) + this.get_port_description(port_addr),
-            LOG_IO
+        console.error(
+            "[diag] write32 port #" + h(port_addr, 4) + " <- " + h(data >>> 0, 8) + this.get_port_description(port_addr)
         );
     }
     return entry.write32.call(entry.device, data);
@@ -357,9 +354,8 @@ IO.prototype.port_read8 = function(port_addr)
 
     if(entry.read8 === this.empty_port_read8 || LOG_ALL_IO)
     {
-        dbg_log(
-            "read8 port  #" + h(port_addr, 4) + this.get_port_description(port_addr),
-            LOG_IO
+        console.error(
+            "[diag] read8 port  #" + h(port_addr, 4) + this.get_port_description(port_addr)
         );
     }
     var value = entry.read8.call(entry.device, port_addr);
@@ -374,9 +370,8 @@ IO.prototype.port_read16 = function(port_addr)
 
     if(entry.read16 === this.empty_port_read16 || LOG_ALL_IO)
     {
-        dbg_log(
-            "read16 port  #" + h(port_addr, 4) + this.get_port_description(port_addr),
-            LOG_IO
+        console.error(
+            "[diag] read16 port  #" + h(port_addr, 4) + this.get_port_description(port_addr)
         );
     }
     var value = entry.read16.call(entry.device, port_addr);
@@ -391,9 +386,8 @@ IO.prototype.port_read32 = function(port_addr)
 
     if(entry.read32 === this.empty_port_read32 || LOG_ALL_IO)
     {
-        dbg_log(
-            "read32 port  #" + h(port_addr, 4) + this.get_port_description(port_addr),
-            LOG_IO
+        console.error(
+            "[diag] read32 port  #" + h(port_addr, 4) + this.get_port_description(port_addr)
         );
     }
     var value = entry.read32.call(entry.device, port_addr);

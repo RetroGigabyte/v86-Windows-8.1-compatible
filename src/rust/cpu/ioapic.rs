@@ -229,12 +229,12 @@ fn read32_internal(ioapic: &mut Ioapic, addr: u32) -> u32 {
                 }
             },
             reg => {
-                dbg_assert!(false, "IOAPIC register read outside of range {:x}", reg);
+                console_log!("[diag] IOAPIC register read outside of range {:#x}", reg);
                 0
             },
         },
         _ => {
-            dbg_assert!(false, "Unaligned or oob IOAPIC memory read: {:x}", addr);
+            console_log!("[diag] Unaligned or oob IOAPIC memory read: {:#x}", addr);
             0
         },
     }
@@ -296,18 +296,16 @@ fn write32_internal(ioapic: &mut Ioapic, apic: &mut apic::Apic, addr: u32, value
                 }
             },
             reg => {
-                dbg_assert!(
-                    false,
-                    "IOAPIC register write outside of range {:x} <- {:x}",
+                console_log!(
+                    "[diag] IOAPIC register write outside of range {:#x} <- {:#x}",
                     reg,
                     value
                 )
             },
         },
         _ => {
-            dbg_assert!(
-                false,
-                "Unaligned or oob IOAPIC memory write: {:x} <- {:x}",
+            console_log!(
+                "[diag] Unaligned or oob IOAPIC memory write: {:#x} <- {:#x}",
                 addr,
                 value
             )

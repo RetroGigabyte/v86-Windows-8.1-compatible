@@ -789,6 +789,36 @@ pub unsafe fn call_interrupt_vector(
     is_software_int: bool,
     error_code: Option<i32>,
 ) {
+    if *protected_mode && matches!(interrupt_nr, 0 | 4 | 5 | 6 | 8 | 10 | 11 | 12 | 13 | 14) {
+        // fault-class exceptions only, protected mode only (real mode reuses
+        // these vector numbers for routine IRQs/BIOS calls, not CPU
+        // exceptions); logged unconditionally (not gated by dbg_log/DEBUG)
+        // for release build visibility.
+        let fault_eip = *previous_ip;
+        let b0 = safe_read8(fault_eip).unwrap_or(-1);
+        let b1 = safe_read8(fault_eip + 1).unwrap_or(-1);
+        let b2 = safe_read8(fault_eip + 2).unwrap_or(-1);
+        let b3 = safe_read8(fault_eip + 3).unwrap_or(-1);
+        let b4 = safe_read8(fault_eip + 4).unwrap_or(-1);
+        let b5 = safe_read8(fault_eip + 5).unwrap_or(-1);
+        console_log!(
+            "[diag] FAULT nr={:#x} sw={} err={:?} eip={:#010x} cpl={} cr2={:#010x} pm={} bytes={:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+            interrupt_nr,
+            is_software_int,
+            error_code,
+            fault_eip,
+            *cpl,
+            *cr.offset(2),
+            *protected_mode,
+            b0,
+            b1,
+            b2,
+            b3,
+            b4,
+            b5
+        );
+    }
+
     if *protected_mode {
         if vm86_mode() && *cr.offset(4) & CR4_VME != 0 {
             panic!("Unimplemented: VME");
@@ -865,8 +895,6 @@ pub unsafe fn call_interrupt_vector(
                 dpl
             );
             dbg_trace();
-            dbg_assert!(descriptor.is_32(), "TODO: Check this (likely #GP)");
-            dbg_assert!(offset == 0, "TODO: Check this (likely #GP)");
             do_task_switch(selector, error_code);
             return;
         }
@@ -1614,6 +1642,16 @@ pub unsafe fn do_task_switch(selector: i32, error_code: Option<i32>) {
     dbg_assert!((descriptor.system_type() & !2) == 1 || (descriptor.system_type() & !2) == 9);
     let tss_is_16 = descriptor.system_type() <= 3;
     let tss_is_busy = (descriptor.system_type() & 2) == 2;
+
+    console_log!(
+        "[diag] do_task_switch sel={:#x} descriptor_addr={:#010x} system_type={:#x} tss_is_busy={} base={:#010x} limit={:#x}",
+        selector.raw,
+        descriptor_address,
+        descriptor.system_type(),
+        tss_is_busy,
+        descriptor.base(),
+        descriptor.effective_limit()
+    );
 
     if (descriptor.system_type() & 2) == 2 {
         // is busy

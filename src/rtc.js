@@ -99,6 +99,10 @@ export function RTC(cpu)
         this.cmos_index = out_byte & 0x7F;
         this.nmi_disabled = out_byte >> 7;
     });
+    cpu.io.register_read(0x70, this, function()
+    {
+        return this.cmos_index | this.nmi_disabled << 7;
+    });
 
     cpu.io.register_write(0x71, this, this.cmos_port_write);
     cpu.io.register_read(0x71, this, this.cmos_port_read);

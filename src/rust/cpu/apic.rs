@@ -268,8 +268,7 @@ fn read32_internal(apic: &mut Apic, addr: u32) -> u32 {
         },
 
         _ => {
-            dbg_log!("APIC read {:x}", addr);
-            dbg_assert!(false);
+            console_log!("[diag] APIC read unknown register {:#x}", addr);
             0
         },
     }
@@ -457,8 +456,7 @@ fn write32_internal(apic: &mut Apic, addr: u32, value: u32) {
         },
 
         _ => {
-            dbg_log!("APIC write32 {:x} <- {:08x}", addr, value);
-            dbg_assert!(false);
+            console_log!("[diag] APIC write unknown register {:#x} <- {:#010x}", addr, value);
         },
     }
 }
