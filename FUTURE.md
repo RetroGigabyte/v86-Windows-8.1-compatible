@@ -188,3 +188,29 @@ likely-cheapest-to-try first:
   browsers (Chrome/Edge) JIT-compile and execute the wasm noticeably faster
   than JavaScriptCore/Safari for this kind of hot, branch-heavy code — worth
   stating explicitly for anyone benchmarking or comparing results.
+
+## The actual end goal: Windows 11 on a Chromebook
+
+All of the above is in service of one target: running Windows 11 inside the
+Chrome browser on an actual Chromebook. Worth stating explicitly, because it
+reframes the whole roadmap's priority order — "boots" and "usable on a
+Chromebook's hardware" are two different bars, and both sections above have
+to land for it to be real, not just the compatibility one.
+
+This is a more natural fit than it might sound like at first — v86 is
+browser-native, and ChromeOS's entire app model *is* the browser, so this
+isn't a weird stretch target, it's arguably the most natural deployment
+surface this project has. But performance will be the harder constraint,
+more than compatibility:
+
+- Chromebooks skew toward weaker hardware than a typical dev machine —
+  low-power Celeron/Pentium-N-class x86 chips, or ARM, and less RAM. Running
+  a full Windows 11 install through a software x86-64 JIT on top of that
+  makes the "Speeding up the CPU" section above load-bearing, not optional.
+- **x86 vs. ARM Chromebooks matter differently than expected.** On x86
+  ChromeOS devices, the wasm just runs on real x86 hardware via Chrome's
+  JIT — straightforward, same as any other x86 host. On ARM Chromebooks, V8
+  still JIT-compiles the wasm to native ARM code transparently, so it works
+  either way — but that's an extra translation layer that doesn't exist on
+  x86 hosts, worth keeping in mind when comparing performance across
+  devices.
