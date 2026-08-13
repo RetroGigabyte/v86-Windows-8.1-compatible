@@ -87,6 +87,161 @@ unsafe fn instr_0F38_crc32(modrm_byte: i32, is_8bit_source: bool) -> OrPageFault
     Ok(())
 }
 
+/// A subset of SSSE3/SSE4.1 instructions from the `66 0F 38` opcode map
+/// (only the 128-bit XMM forms; legacy 64-bit MMX forms without the
+/// mandatory 66 prefix are not implemented and fall through to
+/// unimplemented_sse). Manually decoded for the same reason as CRC32 above
+/// (see instr_0F38_crc32) — the generator skips this opcode map entirely.
+/// Returns Ok(true) if the sub-opcode was handled, Ok(false) if not (caller
+/// should fall back to unimplemented_sse).
+unsafe fn instr_0F38_ssse3_sse41(sub_opcode: i32, modrm_byte: i32) -> OrPageFault<bool> {
+    if *prefixes & prefix::PREFIX_MASK_OPSIZE == 0 {
+        return Ok(false);
+    }
+
+    let reg = modrm_byte >> 3 & 7;
+    let md = modrm_byte >> 6 & 3;
+    let rm = modrm_byte & 7;
+
+    let source = if md == 3 {
+        read_xmm128s(rm)
+    }
+    else {
+        let addr = modrm_resolve(modrm_byte)?;
+        safe_read128s(addr)?
+    };
+    let dest = read_xmm128s(reg);
+    let mut result = reg128 { i8: [0; 16] };
+
+    match sub_opcode {
+        0x00 => {
+            // PSHUFB xmm1, xmm2/m128
+            for i in 0..16 {
+                let ctrl = source.u8[i];
+                result.u8[i] = if ctrl & 0x80 != 0 {
+                    0
+                }
+                else {
+                    dest.u8[(ctrl & 0x0F) as usize]
+                };
+            }
+        },
+        0x1C => {
+            // PABSB
+            for i in 0..16 {
+                result.u8[i] = (source.i8[i] as i32).unsigned_abs() as u8;
+            }
+        },
+        0x1D => {
+            // PABSW
+            for i in 0..8 {
+                result.u16[i] = (source.i16[i] as i32).unsigned_abs() as u16;
+            }
+        },
+        0x1E => {
+            // PABSD
+            for i in 0..4 {
+                result.u32[i] = (source.i32[i] as i64).unsigned_abs() as u32;
+            }
+        },
+        0x29 => {
+            // PCMPEQQ
+            for i in 0..2 {
+                result.u64[i] = if dest.u64[i] == source.u64[i] { u64::MAX } else { 0 };
+            }
+        },
+        0x38 => {
+            // PMINSB
+            for i in 0..16 {
+                result.i8[i] = dest.i8[i].min(source.i8[i]);
+            }
+        },
+        0x39 => {
+            // PMINSD
+            for i in 0..4 {
+                result.i32[i] = dest.i32[i].min(source.i32[i]);
+            }
+        },
+        0x3A => {
+            // PMINUW
+            for i in 0..8 {
+                result.u16[i] = dest.u16[i].min(source.u16[i]);
+            }
+        },
+        0x3B => {
+            // PMINUD
+            for i in 0..4 {
+                result.u32[i] = dest.u32[i].min(source.u32[i]);
+            }
+        },
+        0x3C => {
+            // PMAXSB
+            for i in 0..16 {
+                result.i8[i] = dest.i8[i].max(source.i8[i]);
+            }
+        },
+        0x3D => {
+            // PMAXSD
+            for i in 0..4 {
+                result.i32[i] = dest.i32[i].max(source.i32[i]);
+            }
+        },
+        0x3E => {
+            // PMAXUW
+            for i in 0..8 {
+                result.u16[i] = dest.u16[i].max(source.u16[i]);
+            }
+        },
+        0x3F => {
+            // PMAXUD
+            for i in 0..4 {
+                result.u32[i] = dest.u32[i].max(source.u32[i]);
+            }
+        },
+        0x40 => {
+            // PMULLD
+            for i in 0..4 {
+                result.u32[i] = dest.u32[i].wrapping_mul(source.u32[i]);
+            }
+        },
+        _ => return Ok(false),
+    }
+
+    write_xmm_reg128(reg, result);
+    Ok(true)
+}
+
+/// PALIGNR xmm1, xmm2/m128, imm8 (SSSE3, `66 0F 3A 0F`). Same manual-decode
+/// rationale as the other 0F 38/0F 3A helpers above.
+unsafe fn instr_0F3A_palignr(modrm_byte: i32) -> OrPageFault<()> {
+    let reg = modrm_byte >> 3 & 7;
+    let md = modrm_byte >> 6 & 3;
+    let rm = modrm_byte & 7;
+
+    let source = if md == 3 {
+        read_xmm128s(rm)
+    }
+    else {
+        let addr = modrm_resolve(modrm_byte)?;
+        safe_read128s(addr)?
+    };
+    let imm8 = read_imm8()? as u32 & 0xFF;
+    let dest = read_xmm128s(reg);
+
+    let mut concat = [0u8; 32];
+    concat[0..16].copy_from_slice(&source.u8);
+    concat[16..32].copy_from_slice(&dest.u8);
+
+    let mut result = reg128 { i8: [0; 16] };
+    for i in 0..16u32 {
+        let pos = imm8 + i;
+        result.u8[i as usize] = if pos < 32 { concat[pos as usize] } else { 0 };
+    }
+
+    write_xmm_reg128(reg, result);
+    Ok(())
+}
+
 use crate::config;
 use crate::cpu::arith::{
     bsf16, bsf32, bsr16, bsr32, bt_mem, bt_reg, btc_mem, btc_reg, btr_mem, btr_reg, bts_mem,
@@ -1503,13 +1658,40 @@ pub unsafe fn instr_0F38() {
         return;
     }
 
+    match instr_0F38_ssse3_sse41(sub_opcode, modrm_byte) {
+        Err(()) => return,
+        Ok(true) => return,
+        Ok(false) => {},
+    }
+
     *instruction_pointer = start;
     unimplemented_sse();
 }
 #[no_mangle]
 pub unsafe fn instr_0F39() { unimplemented_sse(); }
 #[no_mangle]
-pub unsafe fn instr_0F3A() { unimplemented_sse(); }
+pub unsafe fn instr_0F3A() {
+    let start = *previous_ip;
+    let sub_opcode = match read_imm8() {
+        Ok(b) => b,
+        Err(()) => return,
+    };
+    let modrm_byte = match read_imm8() {
+        Ok(b) => b,
+        Err(()) => return,
+    };
+
+    if sub_opcode == 0x0F && *prefixes & prefix::PREFIX_MASK_OPSIZE != 0 {
+        // PALIGNR xmm1, xmm2/m128, imm8 (SSSE3)
+        if instr_0F3A_palignr(modrm_byte).is_err() {
+            return;
+        }
+        return;
+    }
+
+    *instruction_pointer = start;
+    unimplemented_sse();
+}
 #[no_mangle]
 pub unsafe fn instr_0F3B() { unimplemented_sse(); }
 #[no_mangle]

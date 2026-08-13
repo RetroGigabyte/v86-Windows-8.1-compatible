@@ -87,6 +87,18 @@ own description) to roughly Core 2 Duo-level: Intel's first mainstream
 Windows 11 (long mode for the OS to boot at all, a second core because it's
 heavily recommended), and neither exists in v86 today.
 
+A smaller, concrete waypoint on the way there: **Intel Core Solo** (Yonah,
+2006) — same generation as Core Duo, but single-core and, notably, still
+32-bit only (no Intel 64/EM64T; that shipped with Core 2/Merom later that
+year alongside SSSE3). So Core Solo sits *between* the Pentium 4 baseline
+and Core 2 Duo: still single-core and 32-bit like today's v86, but with
+SSE3 rather than stopping at SSE2. Some of the SSSE3/SSE4.1 work in the
+"Speeding up the CPU" / Windows 10 sections below already goes past what
+Core Solo actually had (SSSE3 didn't exist yet on that chip) — so in
+instruction-set terms v86 is arguably already ahead of Core Solo and
+heading toward Core 2, just still missing the two properties (64-bit,
+multicore) that actually define the Core 2 generation.
+
 v86 has **zero 64-bit support today**: no long mode, no 4-level (or 5-level)
 paging, no `R8`-`R15` / 64-bit register file, no 64-bit instruction encoding
 (REX prefixes, RIP-relative addressing, etc). This is called out as a known
