@@ -74,6 +74,64 @@ Same loop that found the CRC32 bug:
 
 Expect this to take several iterations, not one.
 
+### Status: the `sse-work` branch, and what actually happened
+
+The `sse-work` branch has a first batch of SSSE3/SSE4.1 instructions
+(`PSHUFB`, `PABSB/W/D`, `PCMPEQQ`, the `PMINS/PMAXS`/`PMINU/PMAXU` family,
+`PMULLD`, `PALIGNR` — see `instr_0F38_ssse3_sse41`/`instr_0F3A_palignr` in
+`src/rust/cpu/instructions_0f.rs`) implemented and **verified correct
+against QEMU's actual reference implementation**
+(`target/i386/ops_sse.h`/`target/i386/tcg/emit.c.inc`, fetched live from
+`qemu/qemu` and diffed instruction-by-instruction). None of these were the
+bug — worth knowing so nobody re-audits them from scratch.
+
+The real story testing against both Tiny10 (NTLite-trimmed) and an official
+32-bit Windows 10 ISO turned out to be a livelock, not a missing
+instruction:
+
+- Windows would boot into the animated-logo screen and sit there
+  indefinitely — CPU genuinely busy (healthy, changing instruction count/
+  mIPS the whole time), zero crashes, zero exceptions. Looked "slow" at
+  first; took a while to realize it was actually stuck.
+- Root cause, found via systematic exception/fault tracing (ruling out SSE
+  instructions, task-gate/double-fault handling, and our NX/paging code
+  first — all confirmed correct): **port `0x70` (CMOS index / NMI-mask)
+  had a write handler but no read handler**, so reads silently fell
+  through to a stub that always returns a constant `0xFF`. Windows was
+  polling this port in a tight loop, apparently verifying the value it had
+  just written — since it could never read back anything but `0xFF`, it
+  never made progress. Fixed by adding a real read handler that reflects
+  the last-written index/NMI state (`src/rtc.js`).
+- A systematic audit of every other `register_write`/`register_read` pair
+  across the device files (RTC, PIT, PS2, PCI, VGA, UART, IDE, DMA, ACPI)
+  turned up no other instance of this pattern — the other asymmetries that
+  exist (PIT `0x43`, VGA index/data pairs, DMA controller ports, the ACPI
+  PM timer) all match real hardware's actual write-only/read-only design,
+  not bugs.
+- After the fix, a full-duration test still sat on the same logo screen
+  for 20+ minutes with no repeating faults — long enough that it's
+  genuinely unclear whether that's a **second**, still-unfound livelock, or
+  just legitimate slowness (a 2.9 GB ESD decompressing under JIT-compiled
+  software emulation). Not yet resolved either way.
+
+**Next step in progress**: pre-installing Tiny10 via QEMU (same approach
+that worked for 8.1 — see the top-level Readme) to separate "does Setup
+itself hang" from "does an already-installed Windows 10 boot cleanly" —
+mirrors exactly how the 8.1 breakthrough was confirmed. If the
+already-installed disk also sits on the logo for 20+ minutes, that's much
+stronger evidence of a second real bug (still there without a fresh
+install's disk-heavy Setup work); if it boots fine, the remaining time was
+probably just Setup being slow.
+
+If picking this up again: the diagnostic infrastructure is still in place
+and reusable — protected-mode-only fault-class exception logging with
+disassembly at the fault site, `do_task_switch` tracing, and
+release-build-visible logging for genuinely-unhandled I/O ports (all
+`console_log!`-based, not gated by `dbg_log`/`DEBUG`, so they work in the
+fast release wasm, not just the slow debug build — see
+`call_interrupt_vector`/`do_task_switch` in `src/rust/cpu/cpu.rs` and
+`IO.prototype.port_read8`/`port_write8` etc. in `src/io.js`).
+
 ## x86-64 (long mode) — needed for Windows 11
 
 This is a different category of problem, not an extension of the 8.1/10
