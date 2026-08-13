@@ -32,10 +32,38 @@ ISO from the Internet Archive. The OS install itself was done in QEMU
 17 GB raw disk image was then booted directly in this v86 fork, which is
 what's shown above.
 
-> **AI Disclaimer:** My changes on top of the NX bit fork (the CRC32 fix and
-> related work described above) were developed with the assistance of
-> Claude AI. I believe AI-written code should be open source to benefit
-> everyone and maintain transparency.
+## Windows 10 (32-bit) — work in progress, on the `sse-work` branch
+
+This branch adds a first batch of SSSE3/SSE4.1 instructions (`PSHUFB`,
+`PABSB/W/D`, `PCMPEQQ`, the `PMINS/PMAXS`/`PMINU/PMAXU` family, `PMULLD`,
+`PALIGNR`) on top of the CRC32 work above — verified correct
+instruction-by-instruction against QEMU's actual reference implementation
+(`target/i386/ops_sse.h`/`target/i386/tcg/emit.c.inc`), not just derived
+from the spec. It also fixes a real, confirmed boot-livelock bug: I/O port
+`0x70` (CMOS index/NMI-mask) had a write handler but no read handler, so
+reads always returned a constant `0xFF` — Windows was polling this port in
+a tight loop verifying a value it could never read back, and never made
+progress. Fixed by adding a proper read handler.
+
+That fix is real and lets Windows 10 setup progress much further than
+before, but boot still hits a **second, unresolved issue**: a page fault on
+a fixed virtual address in the `0xF0010000+` range that nothing ever
+attempts to map — deterministic and identical across a heavily-trimmed
+Windows 10 build (Tiny10) and the official Microsoft 32-bit ISO, both
+fresh-installed and already-installed. The leading theory is that v86's
+PIIX3/i440FX-class virtual chipset (2004-era) is missing platform features
+Windows 10 assumes are present on newer q35/ICH9-class hardware (fuller
+APIC/IOAPIC routing, MSI-capable interrupts) — full details, evidence, and
+the suggested next steps are in [FUTURE.md](FUTURE.md).
+
+**Windows 10 does not yet boot to a working desktop on this fork.** The
+`sse-work` branch is not merged into `main` for that reason — `main`
+stays at the verified-working Windows 8.1 state described above.
+
+> **AI Disclaimer:** My changes on top of the NX bit fork (the CRC32 fix,
+> the SSSE3/SSE4.1 work, and the Windows 10 investigation described above)
+> were developed with the assistance of Claude AI. I believe AI-written
+> code should be open source to benefit everyone and maintain transparency.
 
 ---
 
