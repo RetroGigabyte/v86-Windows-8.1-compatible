@@ -326,23 +326,70 @@ the Bochs/QEMU-ID VGA device (`0x1234:0x1111`) at `0xE0000000`, sized by
 fault address). No PCI device claims that address. It isn't a broken
 BAR; it's an address nothing in v86's PCI/MMIO map owns at all.
 
-**Where this leaves it.** The fault address isn't RAM (above the 2560MB
-configured here), isn't a PCI BAR, and the E820/memory-map that tells
-Windows what's RAM vs. reserved vs. MMIO is built by SeaBIOS itself
-using its standard platform layout logic, not something v86 constructs
-directly — so the mismatch, if there is one, is upstream of anything
-v86's device layer controls. Diagnosing further from here needs either
-(a) real Windows kernel debugging symbols (a WinDbg session over v86's
-serial port, if that's viable, to get an actual symbolic stack instead
-of raw bytes) or (b) the same comparative technique that found the
-ACPI gaps: boot the identical guest image under real QEMU and see
-whether it touches the same address, and if so what's actually mapped
-there — that would say directly what v86 is missing, rather than
-guessing from disassembly alone. Deliberately **not** attempting a
-speculative fix here (e.g., fabricating a fake mapping at that address
-just to stop the fault) — that would risk masking the real gap the same
-way a wrong guess could, and no fix should ship without the same
-regression discipline the WAET/HPET work went through.
+**Checked SeaBIOS's own PCI hole declaration.** `0xf00100d4` falls inside
+the range SeaBIOS reserves for PCI resources via ACPI
+(`BUILD_PCIMEM_START = 0xE0000000` to `BUILD_PCIMEM_END = 0xFEC00000`
+— just below the IOAPIC — patched into the SSDT's `_CRS` from
+`pcimem_start`/`pcimem_end` in `src/fw/pciinit.c`/`acpi.c`). But this is
+identical, stock SeaBIOS behavior — real QEMU declares the exact same
+window — so on its own this doesn't explain a v86-specific gap; it just
+confirms the address is inside the range Windows has been told is
+legitimately PCI-owned, even though nothing currently occupies that
+particular spot within it.
+
+**Definitive: booted the identical disk under real QEMU and it works.**
+Ran the exact same `tiny10.img`, deliberately matched as closely as
+possible to v86's actual emulated hardware rather than a generic
+default — `-machine pc` (i440FX/PIIX3, matching the `8086:1237` host
+bridge and `8086:7000`/`8086:7010`/`8086:7113` PIIX3/4 functions found
+via the live PCI scan above, *not* q35) and `-smp 1` (v86 is
+single-core). Took a screendump via QMP a few minutes in — real QEMU
+reaches the actual Windows 10 desktop (Recycle Bin, the post-setup
+"allow this PC to be discoverable" network prompt) in the time v86 has
+been stuck at the boot logo in every test run so far. This is
+conclusive: the disk image is fine, Windows 10 itself is fine, the
+guest OS's behavior is fine — **this is a v86-specific emulation gap**,
+not a quirk of the OS or a corrupted install.
+
+**Where this leaves it.** Checked one more thing before speculating
+further: whether v86 might respond differently than real hardware to
+an access landing in *unclaimed* space within that PCI hole (real
+hardware/QEMU typically returns "no device" style `0xFFFFFFFF` for
+that, never a fault, since the physical bus is always "there"). Traced
+the actual dispatch path (`src/rust/cpu/memory.rs`'s `in_mapped_range`,
+`src/cpu.js`'s `memory_map_read32`) and that theory doesn't fit: the
+fault we're seeing is caught at the **guest's own page-table walk**
+(`PTE not present`), which happens entirely before any physical/MMIO
+access is ever attempted. Windows never got far enough to touch v86's
+memory dispatch at all — it never had a valid page-table entry for that
+linear address in the first place. So this isn't about how v86 backs
+that physical range; it's about *why Windows's own virtual memory
+manager never mapped it there* — a guest-internal decision, not
+something v86's device/MMIO layer can differ on by definition. (If a
+valid PTE *had* existed and the access reached v86's dispatch with
+nothing registered at that block, `memory_map_read32` would throw a
+hard JS exception rather than silently returning `-1` — worth knowing
+as a separate, real gap, but not the one causing this particular
+fault.)
+
+That points the remaining investigation back toward ACPI resource
+description: Windows 10's PnP/resource-arbiter stack is meaningfully
+newer than 8.1's, and if SeaBIOS's `_CRS` description of the PCI host
+bridge's resource window (the same `0xE0000000`-`0xFEC00000` range
+patched into the SSDT) is technically valid but incomplete in some way
+8.1's older PnP manager tolerates and Windows 10's doesn't, that would
+explain both "8.1 boots fine" and "10 fails inside precisely this
+window" without needing anything else new. That's a real, checkable
+hypothesis but needs either (a) real Windows kernel debugging symbols
+(a WinDbg session over v86's serial port, if viable — would show
+directly which driver/subsystem decided not to map this address) or
+(b) a byte-for-byte diff of the actual `_CRS`/SSDT bytes v86 generates
+against what real QEMU generates for the identical chipset config,
+extending the same ACPI-table-comparison technique that found the
+HPET/WAET gaps. Deliberately **not** attempting a speculative fix here
+— there's no verified understanding yet of what's actually missing,
+and shipping a guess would repeat the HPET mistake instead of learning
+from it.
 
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
