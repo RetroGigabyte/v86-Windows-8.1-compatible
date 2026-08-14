@@ -37,7 +37,9 @@ export function ACPI(cpu)
     cpu.devices.pci.register_device(acpi);
 
     this.timer_last_value = 0;
-    this.timer_imprecision_offset = 0;
+    this.timer_resolution = Number.MAX_SAFE_INTEGER;
+    this.timer_speed = 1;
+    this.timer_number_of_same_readings = 0;
 
     this.status = 1;
     this.pm1_status = 0;
@@ -158,43 +160,38 @@ ACPI.prototype.timer = function(now)
 
 ACPI.prototype.get_timer = function(now)
 {
+    // Due to the low precision of JavaScript's time functions, this
+    // extrapolates a smoothly advancing value between real wall-clock
+    // ticks instead of freezing when polled faster than the browser's
+    // timer resolution - the same technique already used for TSC (see
+    // read_tsc() in src/rust/cpu/cpu.rs), which doesn't suffer from this
+    // timer's old failure mode: a naive fixed "+1 per call, cap at 1ms"
+    // offset can be outpaced by a fast enough polling loop and then
+    // freezes completely (returns a stale value) until real time catches
+    // up, rather than adapting to the actual observed polling rate.
     const t = Math.round(now * (PMTIMER_FREQ_SECONDS / 1000));
-
-    // Due to the low precision of JavaScript's time functions we increment the
-    // returned timer value every time it is read
 
     if(t === this.timer_last_value)
     {
-        // don't go past 1ms
-
-        if(this.timer_imprecision_offset < PMTIMER_FREQ_SECONDS / 1000)
-        {
-            this.timer_imprecision_offset++;
-        }
+        this.timer_number_of_same_readings++;
+        let extra = Math.floor(this.timer_number_of_same_readings * this.timer_resolution / this.timer_speed);
+        extra = Math.min(extra, this.timer_resolution - 1);
+        return this.timer_last_value + extra;
     }
-    else
+
+    dbg_assert(t > this.timer_last_value);
+
+    const d = t - this.timer_last_value;
+    this.timer_resolution = Math.min(this.timer_resolution, d);
+    this.timer_last_value = t;
+
+    if(this.timer_number_of_same_readings !== 0)
     {
-        dbg_assert(t > this.timer_last_value);
-
-        const previous_timer = this.timer_last_value + this.timer_imprecision_offset;
-
-        // don't go back in time
-
-        if(previous_timer <= t)
-        {
-            this.timer_imprecision_offset = 0;
-            this.timer_last_value = t;
-        }
-        else
-        {
-            dbg_log("Warning: Overshot pmtimer, waiting;" +
-                    " current=" + t +
-                    " last=" + this.timer_last_value +
-                    " offset=" + this.timer_imprecision_offset, LOG_ACPI);
-        }
+        this.timer_speed = this.timer_number_of_same_readings;
+        this.timer_number_of_same_readings = 0;
     }
 
-    return this.timer_last_value + this.timer_imprecision_offset;
+    return t;
 };
 
 ACPI.prototype.get_state = function()
