@@ -237,12 +237,20 @@ both were implemented:
   the register/table plumbing (that part already works).
 
 With `WAET` alone in place, the "second Windows 10 bug" above was
-retested (`tiny10.img`, 4 minutes past the ~50s stall point): CPU speed
-stayed active and non-zero throughout (previously all activity stopped
-dead at the stall), but the boot animation itself never progressed past
-the spinning logo in that window either. Inconclusive — better than
-before, not confirmed fixed. Worth a longer unattended run before
-concluding anything.
+retested (`tiny10.img`). A 4-minute run was inconclusive (CPU speed
+stayed active, no visible boot progress); a follow-up **25-minute**
+unattended run resolved the ambiguity: CPU speed stayed steady around
+700 mIPS for the entire run (no crash, no drop to zero), but the boot
+animation never moved past the spinning logo at any point. So `WAET`
+changed the *symptom*, not the outcome — before, execution hit the
+missing PDE and everything stopped dead (a real halt); now, whatever is
+happening keeps the CPU busy indefinitely without making forward
+progress (a livelock, either at the same page-fault site looping instead
+of halting, or a different stall entirely — not yet determined which).
+Still not booting. The original plan to instrument the debug build and
+find out *why* that PDE is zero is still the real next step; `WAET` was
+worth trying (cheap, and it's a legitimate table gap regardless) but
+doesn't replace that investigation.
 
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
