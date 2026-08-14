@@ -156,29 +156,62 @@ disassembly), and timing are identical across Tiny10 (fresh install and
 pre-installed) and the official Windows 10 32-bit ISO — this is
 deterministic, not flaky.
 
-Best-supported theory: **v86 emulates a PIIX3/i440FX-class chipset**
-(2004-era, Pentium-4-generation PCI/ACPI topology — see `src/pci.js`/
-`src/acpi.js`), but the QEMU install used to produce the comparison disk
-image was `-machine q35` (ICH9-class, 2008-era, Core-2-generation). Same
-SeaBIOS binary in both cases, but a fundamentally different PCI/ACPI
-hardware topology described to it — not an apples-to-apples comparison.
-Windows 10's kernel/HAL increasingly assumes q35/ICH9-class platform
-features (fuller APIC/IOAPIC routing, MSI-capable interrupt delivery,
-newer ACPI resource descriptors) that don't exist on PIIX3-class hardware,
-regardless of how correct the CPU instruction emulation is. This also
-lines up with the historical `copy/v86#86` GitHub issue (Windows XP not
-booting years ago because "the APIC implementation is quite incomplete")
-— that ceiling was raised since, but apparently not all the way to
-q35-class completeness.
+**Confirmed via directly comparing the actual ACPI tables**, not just
+theorizing: dumped v86's real guest-memory ACPI tables (via `read_memory`
+on the exposed debug `V86` instance — scan `0xE0000`-`0xFFFFF` for the
+`RSD PTR` signature, walk the RSDT chain) and QEMU's equivalent (via QMP
+`pmemsave` on a bare `-machine q35` instance, no OS needed — SeaBIOS builds
+these during POST regardless of whether a bootable OS is found), then
+parsed both with the same script. Result:
 
-**If this theory is right, the fix isn't a targeted patch** — it's adding
-a newer virtual chipset (ICH9/q35-class: new PCI topology, MMCONFIG
-support, more complete IOAPIC) alongside or instead of the current
-PIIX3-class one. That's a substantial feature addition, comparable in
-scope to the x86-64 work below, not an instruction-level bug fix. Worth
-validating the theory further (e.g., diffing SeaBIOS's actual generated
-ACPI tables under v86 vs. under `-machine q35`) before committing to that
-scope of work.
+| Table | v86 | QEMU q35 |
+|---|---|---|
+| FACP (FADT) | 116 bytes | 244 bytes |
+| APIC (MADT) | 110 bytes | 128 bytes |
+| SSDT | present | — |
+| `HPET` | **missing** | present |
+| `MCFG` | **missing** | present |
+| `WAET` | **missing** | present |
+
+Traced the *why* by fetching v86's actual vendored SeaBIOS source at its
+exact pinned tag (`rel-1.16.2`, via `bios/fetch-and-build-seabios.sh`) —
+important because current SeaBIOS `master` has deprecated its own internal
+ACPI table builder entirely (`acpi_setup()` is now a 4-line stub: *"ACPI
+tables for qemu 1.6 and older are not supported any more"*), while
+`rel-1.16.2` (685 lines) still has the full legacy internal builder. That
+explains each gap precisely, not just generally:
+
+- **`MCFG`**: SeaBIOS only builds this
+  `if (pci->device == PCI_DEVICE_ID_INTEL_ICH9_LPC)` — genuinely q35-only
+  by design. Correctly absent on PIIX3-class hardware; **not a bug**.
+- **`HPET`**: SeaBIOS calls `build_hpet()` **unconditionally**, but that
+  function works by reading real HPET hardware registers
+  (`readl(hpet_base + HPET_ID)` at a fixed MMIO address) to fill in the
+  table. **v86 doesn't implement an HPET device at all**, so this read
+  almost certainly returns garbage/unmapped-memory default, and SeaBIOS
+  presumably detects "no device" and skips the table. Concrete, bounded
+  fix: add a minimal HPET device model to v86 and this table should start
+  being emitted for free by SeaBIOS's existing code.
+- **`WAET`**: SeaBIOS `rel-1.16.2` has **no code to build this at all** —
+  real QEMU generates it itself and injects it via a `fw_cfg` file
+  (SeaBIOS has a loader loop, `romfile_findprefix("acpi/", ...)`, that
+  picks up and relocates any `acpi/*` fw_cfg files QEMU provides). v86's
+  `fw_cfg` implementation (`src/cpu.js`, search `FW_CFG_FILE_DIR`) doesn't
+  expose any ACPI files, only option ROMs. `WAET` is a Windows-specific
+  "trust this platform, skip slow legacy timer-calibration workarounds"
+  hint table — its absence plausibly explains the ACPI-PM-timer-heavy
+  polling loop (`0xB008` reads, alternating with IDE bus-master status)
+  observed in the full I/O trace earlier. Concrete, bounded fix: construct
+  the ~40-byte WAET table body and expose it via a `fw_cfg` file the same
+  way QEMU does.
+
+Both fixes are **bounded, addressable engineering tasks** — not a new
+chipset. (My earlier framing in this doc — "needs a whole new ICH9/q35
+chipset" — was too broad; scrap that, this is more precise and much
+cheaper to attempt.) Worth trying `HPET` first, since it's the simpler of
+the two (one device model, no `fw_cfg` mechanism needed) and is read
+unconditionally by SeaBIOS regardless of chipset — most likely to move the
+needle on its own.
 
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
