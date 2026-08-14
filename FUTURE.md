@@ -252,6 +252,28 @@ find out *why* that PDE is zero is still the real next step; `WAET` was
 worth trying (cheap, and it's a legitimate table gap regardless) but
 doesn't replace that investigation.
 
+**Follow-up debug-build run (which of the two it is): confirmed
+livelock, not a repeated fault.** Booted `debug.html` (not release) with
+`LOG_PAGE_FAULTS = true`, same `tiny10.img`. Two page faults fire, both
+at `cr2=0xf00100d4` (inside the same `0xF0010000+` region as before, but
+this time a **read** fault from a plain `MOV r8, [mem]`
+(`instr_8A_mem`), not the earlier write via `stosd_rep`/`MOV
+CL,[EDX+EAX]` — so it's not necessarily the exact same instruction as the
+original find, just the same page). SeaBIOS/Windows compiles one more
+page (`Finished compiling for page at 216f000`) right after, and then
+**the log goes completely silent for the rest of the run** — zero further
+`[CPU ]`-tagged lines (no more faults, no task switches, no new page
+compiles, nothing) for the remaining ~170 seconds, while the release
+build's speed counter simultaneously shows a steady ~700 mIPS the whole
+time. Put together, that means real work is happening (hundreds of
+millions of instructions/sec) but it's confined entirely to
+already-JIT-compiled code that never touches any of the many logged
+event types — consistent with a tight polling/spin loop re-executing the
+same cached basic block(s) over and over, not a hang and not forward
+progress. That two-fault handoff (read fault → one page compiled → total
+silence) is the concrete thing to trace next: what code is at
+`eip=0x815747fd`/nearby, and what it's spinning on.
+
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
 disassembly at the fault site (`call_interrupt_vector` in
