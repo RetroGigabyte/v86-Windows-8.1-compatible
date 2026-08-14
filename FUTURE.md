@@ -604,37 +604,28 @@ read-after-write verification now sees consistent state) — it does
 value at all). That part still needs wiring dynamic enable/disable
 through `io.js` for every device class if it's ever tackled.
 
-**One more real divergence, found broadening the halfix diff to IDE
-(the device most actively used right up to the fault, per the very
-first investigation above — 1800+ successful DMA transfers before
-everything stops).** Compared IDE DMA-completion/interrupt handling.
-halfix's `ide_raise_irq` (`src/hardware/ide.c`) sets the bus-master DMA
-status register's "Interrupt" bit (`dma_status |= 0x04`) **unconditionally**
-on every completion — separately, `ide_update_irq` gates whether the
-actual `INTRQ` line fires based on the device control register's NIEN
-(no-interrupt-enable) bit. So in halfix, the status bit always reflects
-"a transfer just completed," and NIEN only controls whether that fact
-also raises a real interrupt.
-
-v86's equivalent (`IDEChannel.prototype.push_irq`, `src/ide.js`) sets
-its DMA status bit **inside** the same `if(NIEN === 0)` branch that
-raises the actual IRQ — verified by direct read, not inference. So if
-NIEN is set (a driver deliberately masks interrupts to poll instead,
-a legitimate and not-uncommon technique), v86 never sets the status bit
-at all, where halfix always would. A driver polling that status bit
-under masked-interrupt conditions would wait forever on v86 for
-something that already happened but was never recorded.
-
-Presented as a verified code-level divergence, not a confirmed bug —
-don't have the actual Bus Master IDE spec text in hand to cite with
-full confidence about which behavior is normatively correct, though
-halfix's separation (status bit vs. physical IRQ line being two
-different, independently-gated things) matches how the two are usually
-described. Worth checking against the real spec and, if confirmed,
-moving the `dma_status |= 4` line in `push_irq` outside the NIEN check
-(keeping only the actual `device_raise_irq` call gated by it) — a
-small, targeted change if it turns out to be real. Not attempted
-tonight; flagging for verification first.
+**A halfix/v86 IDE divergence that turned out to be halfix, not v86,
+being the outlier — checked against QEMU before trusting the flag.**
+While broadening the halfix diff to IDE (the device most actively used
+right up to the fault, per the very first investigation above — 1800+
+successful DMA transfers before everything stops), found that halfix's
+`ide_raise_irq` (`src/hardware/ide.c`) sets the bus-master DMA status
+register's "Interrupt" bit unconditionally on completion, while v86's
+`IDEChannel.prototype.push_irq` (`src/ide.js`) only sets that same bit
+inside the NIEN-gated branch that also raises the real IRQ. Initially
+flagged this as a possible v86 bug — but rather than trust a two-way
+comparison without a stronger reference, checked QEMU's actual IDE
+source (`hw/ide/core.c`'s `ide_bus_set_irq`, `hw/ide/pci.c`'s
+`bmdma_irq`): QEMU gates `qemu_irq_raise` itself on the NIEN-equivalent
+bit (`IDE_CTRL_DISABLE_IRQ`), and since that's what feeds the status-bit
+write, **QEMU's status bit is also NIEN-gated** — matching v86, not
+halfix. So this was backwards: v86 was already correct, halfix is the
+outlier here. No fix needed; corrected before it could mislead a future
+attempt into "fixing" already-correct code. Lesson for any further
+halfix comparisons: halfix is a useful second opinion, not a ground
+truth on its own — cross-check against QEMU (or real hardware docs)
+before trusting a flagged divergence, the way this one almost went
+the wrong way.
 
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
