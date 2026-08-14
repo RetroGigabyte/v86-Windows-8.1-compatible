@@ -678,6 +678,25 @@ supported range (e.g. 1024MB or exactly at the clamp boundary) instead
 of unknowingly running at a silently-clamped, non-round value the
 whole time — completely untested angle, about to try it now.
 
+**Started that audit, didn't finish it.** Checked the two most directly
+relevant downstream consumers of `size` after the clamp: JS-side
+storage (`this.memory_size = view(Uint32Array, ...)` — correctly
+unsigned, no 2GB issue) and the actual Rust-side allocator
+(`allocate_memory(size: u32) -> u32` in `src/rust/cpu/memory.rs`, and
+`in_mapped_range(addr: u32)` in the same file — both `u32` throughout,
+no inherent 2GB constraint found). Neither of the two places checked
+shows a genuine reason for the cap, which suggests it may be more
+conservative than strictly necessary — but that's exactly the kind of
+partial finding that's dangerous to act on: JS bitwise operators
+(`|`, `&`, `^`, `<<`, `>>`) are *always* signed-32-bit regardless of
+target type, and there could easily be another comparison or bitwise
+op elsewhere in the ~10,000+ line JS layer (or in JIT-generated code
+paths) that silently depends on addresses fitting in a signed range,
+not yet found. Two clean spots isn't a clean codebase. Not raising the
+limit without a real, complete audit — flagging the two checked
+call sites so a future attempt doesn't have to re-derive them, but the
+audit itself is still open.
+
 **Retested — decisive result, but not the one hoped for.** Booted the
 identical `tiny10.img` with `memory_size=2047` (confirmed honored this
 time: `cpu.memory_size[0]` = 2,146,435,072 bytes, correctly under the
