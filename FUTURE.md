@@ -556,6 +556,43 @@ entire class of platform-timing inaccuracy v86 currently has) — but
 not confirmed as *the* cause of this specific fault. Worth keeping in
 mind as a contributing-factor candidate, not oversold as solved.
 
+**A real, unrelated-but-significant PCI gap, found comparing against
+halfix's device config space.** Diffed halfix's static PIIX4 ACPI PCI
+config bytes (`acpi_configuration_space` in `src/hardware/acpi.c`)
+against v86's equivalent (`pci_space` in `src/acpi.js`) byte-for-byte.
+Real hardware/halfix reset the Command register (config offset `0x04`)
+to `0x0000` — I/O space, memory space, and bus mastering all *disabled*
+until the BIOS/OS explicitly enables them, standard PCI behavior. v86's
+default is `0x0007` — all three **pre-enabled** before any BIOS/OS
+request. Checked whether this matters in practice by reading
+`PCI.prototype.pci_write32` in `src/pci.js`: **writes to offset `0x04`
+are a deliberate no-op** — logged but never applied (`space[addr >>
+2] = written` happens for every other offset's fallthrough case, but
+the `addr === 0x04` branch only calls `dbg_log`). This isn't
+ACPI-specific; it's generic PCI config-space handling, so it applies to
+*every* PCI device v86 emulates. Practical effect: no guest can ever
+actually disable or re-enable a device's I/O/memory/bus-master decode
+through the standard PCI mechanism — v86 always behaves as if
+everything is permanently enabled, regardless of what the guest
+believes it just configured.
+
+This is a real, structurally significant, easily-verified gap
+(objectively incomplete PCI emulation, independent of whether it's
+related to the Windows 10 stall) — Windows's PnP resource manager
+routinely disables a device's decode, reprograms its BARs, and
+re-enables it as part of normal resource (re)assignment; if v86 always
+keeps the device live regardless, the guest's internal bookkeeping
+(which assumes the disable succeeded) can diverge from what's actually
+happening, exactly the kind of host/guest state mismatch that could
+plausibly confuse a resource arbiter. Not implementing a fix here
+tonight: doing it properly means wiring real dynamic I/O/memory-decode
+enable/disable through `io.js` for every device class, not a
+one-device patch — broad enough surface area, this late in a long
+session, to risk exactly the kind of regression the HPET attempt
+caused earlier tonight. Documented precisely (exact file/line, exact
+mechanism) so a future attempt can go straight to implementation
+without re-deriving this.
+
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
 disassembly at the fault site (`call_interrupt_vector` in
