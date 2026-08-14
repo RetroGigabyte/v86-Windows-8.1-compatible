@@ -394,6 +394,21 @@ conclusive: the disk image is fine, Windows 10 itself is fine, the
 guest OS's behavior is fine — **this is a v86-specific emulation gap**,
 not a quirk of the OS or a corrupted install.
 
+**Closed the one remaining gap in that conclusion.** The test above used
+QEMU's own bundled *modern* SeaBIOS, not v86's exact vendored
+`bios/seabios.bin` (rel-1.16.2) — so it didn't fully rule out "something
+specific to that old firmware binary" as the cause, separate from v86's
+own CPU/device emulation. Reran with `-bios bios/seabios.bin` pointed
+directly at v86's actual vendored file (same one used for the earlier
+Bochs-BIOS-vs-SeaBIOS ACPI comparison), same `tiny10.img`, same matched
+i440FX/single-core config. Result: **boots to desktop successfully** —
+Recycle Bin, taskbar, clock all rendering normally. This eliminates
+firmware as a variable entirely: the exact same SeaBIOS binary v86 uses
+works fine under real QEMU, so the bug cannot be a latent issue in that
+firmware itself. It's specifically in how v86 emulates the CPU or
+devices underneath that firmware — not the firmware, not the OS, not
+the disk.
+
 **Where this leaves it.** Checked one more thing before speculating
 further: whether v86 might respond differently than real hardware to
 an access landing in *unclaimed* space within that PCI hole (real
