@@ -384,10 +384,25 @@ hypothesis but needs either (a) real Windows kernel debugging symbols
 (a WinDbg session over v86's serial port, if viable — would show
 directly which driver/subsystem decided not to map this address) or
 (b) a byte-for-byte diff of the actual `_CRS`/SSDT bytes v86 generates
-against what real QEMU generates for the identical chipset config,
-extending the same ACPI-table-comparison technique that found the
-HPET/WAET gaps. Deliberately **not** attempting a speculative fix here
-— there's no verified understanding yet of what's actually missing,
+against what real QEMU generates for the identical chipset config.
+
+**Tried (b) tonight; it's a dead end with the tools on hand.** The
+ACPI-table-comparison technique that found the HPET/WAET gaps relied on
+real QEMU using SeaBIOS's own internal ACPI builder, same as v86 — true
+at the time that comparison was done. It doesn't hold here: the only
+QEMU available (11.0.0, current Homebrew) always generates its own
+ACPI tables via `fw_cfg`, completely bypassing SeaBIOS's internal
+builder, *regardless of which SeaBIOS binary is loaded* — confirmed by
+loading v86's exact vendored `bios/seabios.bin` via `-bios` and seeing
+QEMU-native tables anyway (`HPET`/`WAET` present, no `SSDT` at all,
+where v86's rel-1.16.2-built tables always include an `SSDT` and, before
+tonight, no `HPET`/`WAET`). A genuine byte-for-byte `_CRS` diff would
+need an old QEMU build from roughly the SeaBIOS rel-1.16.2 era — not
+installed, not pulled in tonight. Leaving this documented so nobody
+re-spends time on the same dead end; (a), the WinDbg route, is the more
+promising remaining option. Deliberately **not** attempting a
+speculative fix here — there's no verified understanding yet of what's
+actually missing,
 and shipping a guess would repeat the HPET mistake instead of learning
 from it.
 
