@@ -584,14 +584,25 @@ re-enables it as part of normal resource (re)assignment; if v86 always
 keeps the device live regardless, the guest's internal bookkeeping
 (which assumes the disable succeeded) can diverge from what's actually
 happening, exactly the kind of host/guest state mismatch that could
-plausibly confuse a resource arbiter. Not implementing a fix here
-tonight: doing it properly means wiring real dynamic I/O/memory-decode
-enable/disable through `io.js` for every device class, not a
-one-device patch — broad enough surface area, this late in a long
-session, to risk exactly the kind of regression the HPET attempt
-caused earlier tonight. Documented precisely (exact file/line, exact
-mechanism) so a future attempt can go straight to implementation
-without re-deriving this.
+plausibly confuse a resource arbiter.
+
+**Fixed the narrow part; the broader part is still open.** On reflection,
+the no-op wasn't actually one indivisible thing — `pci_write8` and
+`pci_write16` already write through offset `0x04` correctly (no special
+case at all); only `pci_write32` had the no-op. That's a much
+lower-risk fix than it first looked: removing the special case just
+makes the 32-bit path consistent with the two paths that already work
+correctly in production, rather than inventing new behavior. Shipped
+that (regression-tested three times against Windows 8.1 — one run hit
+the same `pic.rs` flake documented earlier, at the same rate seen all
+night independent of code changes; two clean reruns after). What's
+**still** unfixed and still a bigger, riskier undertaking: this only
+makes the register *persist* what's written to it (so a driver doing
+read-after-write verification now sees consistent state) — it does
+**not** make v86 actually *behave* differently based on those bits
+(I/O/memory/bus-master decode still isn't gated by this register's
+value at all). That part still needs wiring dynamic enable/disable
+through `io.js` for every device class if it's ever tackled.
 
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
