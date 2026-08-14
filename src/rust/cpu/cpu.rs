@@ -789,35 +789,23 @@ pub unsafe fn call_interrupt_vector(
     is_software_int: bool,
     error_code: Option<i32>,
 ) {
-    if *protected_mode
-        && matches!(interrupt_nr, 0 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 16 | 17 | 18 | 19)
-    {
-        // fault-class exceptions only, protected mode only (real mode reuses
-        // these vector numbers for routine IRQs/BIOS calls, not CPU
-        // exceptions); logged unconditionally (not gated by dbg_log/DEBUG)
-        // for release build visibility.
-        let fault_eip = *previous_ip;
-        let b0 = safe_read8(fault_eip).unwrap_or(-1);
-        let b1 = safe_read8(fault_eip + 1).unwrap_or(-1);
-        let b2 = safe_read8(fault_eip + 2).unwrap_or(-1);
-        let b3 = safe_read8(fault_eip + 3).unwrap_or(-1);
-        let b4 = safe_read8(fault_eip + 4).unwrap_or(-1);
-        let b5 = safe_read8(fault_eip + 5).unwrap_or(-1);
+    if *protected_mode && interrupt_nr == 8 {
+        // double fault only (should essentially never happen); logged
+        // unconditionally (not gated by dbg_log/DEBUG) for release build
+        // visibility. Deliberately does NOT read guest memory here (no
+        // disassembly) since that has real side effects (page walks,
+        // accessed-bit updates, potential nested faults) and firing on
+        // common vectors like #PF (14) risked corrupting real CPU state
+        // instead of just observing it.
         console_log!(
-            "[diag] FAULT nr={:#x} sw={} err={:?} eip={:#010x} cpl={} cr2={:#010x} pm={} bytes={:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+            "[diag] FAULT nr={:#x} sw={} err={:?} eip={:#010x} cpl={} cr2={:#010x} pm={}",
             interrupt_nr,
             is_software_int,
             error_code,
-            fault_eip,
+            *previous_ip,
             *cpl,
             *cr.offset(2),
-            *protected_mode,
-            b0,
-            b1,
-            b2,
-            b3,
-            b4,
-            b5
+            *protected_mode
         );
     }
 
