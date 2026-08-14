@@ -295,19 +295,21 @@ unsafe fn instr_0F38_ssse3_sse41(sub_opcode: i32, modrm_byte: i32) -> OrPageFaul
                 result.u16[4 + i] = source.i32[i].clamp(0, u16::MAX as i32) as u16;
             }
         },
-        // PCMPGTQ (0x37) deliberately NOT implemented: bisected a real
-        // Windows 8.1 regression (BAD_SYSTEM_CONFIG_INFO, surfacing as an
-        // unrelated-looking dbg_assert panic in pic.rs, suggesting state
-        // corruption rather than a crash at the point of the bug) down to
-        // this specific opcode by disabling/re-enabling each new
-        // instruction in this batch one at a time and rerunning the full
-        // Windows 8.1 regression test. The widening family, PMULDQ, and
-        // PACKUSDW above are all confirmed clean this way. Root cause not
-        // found - the implementation looked correct on repeated review
-        // and follows the same pattern as the already-working PCMPEQQ
-        // just above. Left unimplemented (falls through to
-        // unimplemented_sse()) rather than ship something demonstrated
-        // unsafe without understanding why.
+        // PCMPGTQ (0x37) deliberately NOT implemented. Bisected a Windows
+        // 8.1 regression (BAD_SYSTEM_CONFIG_INFO, via an unrelated-looking
+        // dbg_assert panic in pic.rs) down to this opcode by disabling
+        // each new instruction one at a time and rerunning the full
+        // regression suite - but re-enabling it afterward with diagnostic
+        // logging (to see what triggered it) reproduced *zero* crashes
+        // and *zero* invocations across three separate runs. So either
+        // it's invoked rarely enough that three runs weren't enough to
+        // hit it again, or the original bisection result was a
+        // coincidence and the real cause is a pre-existing, timing-
+        // sensitive bug unrelated to this opcode's logic (which reads as
+        // correct on repeated review and matches the already-working
+        // PCMPEQQ above). Left unimplemented either way: three clean
+        // reruns don't prove it's safe, they just failed to reproduce
+        // whatever the original run hit.
         _ => return Ok(false),
     }
 
