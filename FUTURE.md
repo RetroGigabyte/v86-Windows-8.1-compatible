@@ -289,15 +289,60 @@ masked, waiting on something that can only change via an interrupt it
 has itself turned off, or polling a device/memory flag that v86 never
 updates.
 
-Exact location, for whoever picks this up: **`cs:eip = 0x0008:0x813AB26A`**,
-`esp=0x81504FAC`, `ebp=0x8150539C`, `esi=0x80D15404`, `edi=0x81505314`,
-flags `p z` (parity+zero, `if=0`), `mode=prot/32 paging=1 pae=1 cpl=0`.
-The concrete next step is disassembling the instructions at that linear
-address (walk the current CR3 to translate `0x813AB26A`, then read and
-decode the bytes — the same `read_memory`-based approach used for the
-ACPI dump script, extended with page-table translation since this is a
-paged kernel address, not identity-mapped low memory) to find out
-exactly what it's waiting on.
+(Note: the exact `eip` value differs per boot — the guest's kernel-space
+layout isn't identical run to run, see below — so treat the specific
+address in the earlier draft of this note as an example, not a constant.)
+
+**Disassembled it. It's `EB FE` — a literal `jmp $`.** Used
+`cpu.get_real_eip()` and `cpu.translate_address_system_read()` (both
+real wasm-exported CPU methods, not hand-rolled page-table walking) to
+correctly translate the *live* eip each run and read the actual bytes
+there via the existing physical-memory `read_memory` path. Confirmed
+stable across a fresh 3-second re-sample in the same run. The two bytes
+at `eip` are `eb fe`: an unconditional relative jump to itself — the
+canonical x86 "park this CPU forever" idiom. Not a poll loop, not a
+wait-for-interrupt — a dead end, reached deliberately.
+
+**Confirmed causally linked to the earlier page fault, not just
+correlated.** Dumped the top of the stack at the parked `esp`: one of
+the dwords sitting there is `0xf00100d4` — **the exact `cr2` value from
+the page fault logged earlier in the same boot.** The physical address
+of the parked code (`translate_address_system_read(eip)`) also lands at
+`0x216f26a`, matching the debug log's `"Finished compiling for page at
+216f000"` line that printed immediately after that fault. Three
+independent signals (stack contents, physical code address, log
+timing) all point at the same fault. This is definitively the tail end
+of whatever handles that fault failing, not an unrelated stall.
+
+**Ruled out PCI BAR misconfiguration as the cause.** `0xf00100d4` sits
+in the address range real PCs typically reserve for PCI MMIO/BARs, so
+the natural next suspect was "some device's BAR points here but nothing
+backs it in v86." Read live PCI config space directly from the guest
+(via ports `0xCF8`/`0xCFC`, enumerating all 32 possible device slots on
+bus 0) at the stall point. Result: only one memory BAR exists at all —
+the Bochs/QEMU-ID VGA device (`0x1234:0x1111`) at `0xE0000000`, sized by
+`vga_memory_size` (8 MB by default, `src/vga.js`) — nowhere near
+`0xf00100d4` (`0xE0000000 + 8MB = 0xE0800000`, ~250 MB short of the
+fault address). No PCI device claims that address. It isn't a broken
+BAR; it's an address nothing in v86's PCI/MMIO map owns at all.
+
+**Where this leaves it.** The fault address isn't RAM (above the 2560MB
+configured here), isn't a PCI BAR, and the E820/memory-map that tells
+Windows what's RAM vs. reserved vs. MMIO is built by SeaBIOS itself
+using its standard platform layout logic, not something v86 constructs
+directly — so the mismatch, if there is one, is upstream of anything
+v86's device layer controls. Diagnosing further from here needs either
+(a) real Windows kernel debugging symbols (a WinDbg session over v86's
+serial port, if that's viable, to get an actual symbolic stack instead
+of raw bytes) or (b) the same comparative technique that found the
+ACPI gaps: boot the identical guest image under real QEMU and see
+whether it touches the same address, and if so what's actually mapped
+there — that would say directly what v86 is missing, rather than
+guessing from disassembly alone. Deliberately **not** attempting a
+speculative fix here (e.g., fabricating a fake mapping at that address
+just to stop the fault) — that would risk masking the real gap the same
+way a wrong guess could, and no fix should ship without the same
+regression discipline the WAET/HPET work went through.
 
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
