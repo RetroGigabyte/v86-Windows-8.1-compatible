@@ -409,6 +409,25 @@ firmware itself. It's specifically in how v86 emulates the CPU or
 devices underneath that firmware — not the firmware, not the OS, not
 the disk.
 
+**Correction — that boot success doesn't mean what it first looked
+like.** Dumped this exact QEMU instance's own ACPI tables (same
+`pmemsave`-based technique as the HPET/WAET work) to properly retry the
+`_CRS`/SSDT diff this enables. Result: **still `HPET`/`WAET` present,
+still no `SSDT`** — identical to every other modern-QEMU test tonight,
+*even with v86's exact SeaBIOS binary loaded via `-bios`*. So modern
+QEMU's `fw_cfg` ACPI injection overrides SeaBIOS's internal table
+builder regardless of which firmware image is loaded — the boot-success
+test above proves the SeaBIOS *code* has no bug, but the guest never
+actually ran on the ACPI *tables* v86's older internal builder produces
+(SeaBIOS deferred to QEMU's injected ones instead, silently). The
+`_CRS`/SSDT diff is therefore still blocked exactly as documented
+earlier — needs a genuinely old QEMU build, not just the old firmware
+binary loaded into a new QEMU. Worth being precise about the actual
+scope of tonight's conclusion: **confirmed** v86-specific CPU/device
+emulation gap, firmware code itself ruled out; **not** confirmed
+anything about whether v86's specific ACPI table content is fine, since
+that was never actually tested against a real reference.
+
 **Where this leaves it.** Checked one more thing before speculating
 further: whether v86 might respond differently than real hardware to
 an access landing in *unclaimed* space within that PCI hole (real
