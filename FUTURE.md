@@ -463,7 +463,8 @@ directly which driver/subsystem decided not to map this address) or
 (b) a byte-for-byte diff of the actual `_CRS`/SSDT bytes v86 generates
 against what real QEMU generates for the identical chipset config.
 
-**Tried (b) tonight; it's a dead end with the tools on hand.** The
+**Tried (b) tonight; it's a dead end with the tools on hand — and later
+confirmed structurally dead, not just blocked by tooling.** The
 ACPI-table-comparison technique that found the HPET/WAET gaps relied on
 real QEMU using SeaBIOS's own internal ACPI builder, same as v86 — true
 at the time that comparison was done. It doesn't hold here: the only
@@ -473,13 +474,25 @@ builder, *regardless of which SeaBIOS binary is loaded* — confirmed by
 loading v86's exact vendored `bios/seabios.bin` via `-bios` and seeing
 QEMU-native tables anyway (`HPET`/`WAET` present, no `SSDT` at all,
 where v86's rel-1.16.2-built tables always include an `SSDT` and, before
-tonight, no `HPET`/`WAET`). A genuine byte-for-byte `_CRS` diff would
-need an old QEMU build from roughly the SeaBIOS rel-1.16.2 era — not
-installed, not pulled in tonight. Leaving this documented so nobody
-re-spends time on the same dead end; (a), the WinDbg route, is the more
-promising remaining option. Deliberately **not** attempting a
-speculative fix here — there's no verified understanding yet of what's
-actually missing,
+tonight, no `HPET`/`WAET`).
+
+Later in the same session, pulled Docker (`debian:bullseye`,
+`qemu-system-x86 5.2.0`, a genuinely old build from 2020/2021 — well
+before v86's SeaBIOS rel-1.16.2 vendoring) specifically to retry this
+with an old QEMU, since the earlier note framed it as blocked only by
+not having one on hand. Ran the identical test (v86's exact
+`seabios.bin` via `-bios`, headless, `pmemsave`-based ACPI dump): same
+result — `HPET`/`WAET` present, no `SSDT`. So this isn't a recent QEMU
+behavior that an old-enough build would sidestep; QEMU has deferred to
+its own `fw_cfg`/`bios-linker-loader` ACPI generation over loaded
+firmware for at least 5+ years. Getting genuinely different behavior
+would need a QEMU old enough to predate that mechanism entirely
+(pre-2013/2014-ish), which is impractical to obtain or build in a
+useful state. This closes the byte-for-byte `_CRS` diff idea for real,
+not just for tonight — (a), the WinDbg route, remains the only
+structurally viable path to a real comparison. Deliberately **not**
+attempting a speculative fix here — there's no verified understanding
+yet of what's actually missing,
 and shipping a guess would repeat the HPET mistake instead of learning
 from it.
 
