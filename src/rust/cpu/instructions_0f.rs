@@ -295,21 +295,20 @@ unsafe fn instr_0F38_ssse3_sse41(sub_opcode: i32, modrm_byte: i32) -> OrPageFaul
                 result.u16[4 + i] = source.i32[i].clamp(0, u16::MAX as i32) as u16;
             }
         },
-        // PCMPGTQ (0x37) deliberately NOT implemented. Bisected a Windows
-        // 8.1 regression (BAD_SYSTEM_CONFIG_INFO, via an unrelated-looking
-        // dbg_assert panic in pic.rs) down to this opcode by disabling
-        // each new instruction one at a time and rerunning the full
-        // regression suite - but re-enabling it afterward with diagnostic
-        // logging (to see what triggered it) reproduced *zero* crashes
-        // and *zero* invocations across three separate runs. So either
-        // it's invoked rarely enough that three runs weren't enough to
-        // hit it again, or the original bisection result was a
-        // coincidence and the real cause is a pre-existing, timing-
-        // sensitive bug unrelated to this opcode's logic (which reads as
-        // correct on repeated review and matches the already-working
-        // PCMPEQQ above). Left unimplemented either way: three clean
-        // reruns don't prove it's safe, they just failed to reproduce
-        // whatever the original run hit.
+        // PCMPGTQ (0x37) deliberately NOT implemented. Originally bisected
+        // a Windows 8.1 regression (BAD_SYSTEM_CONFIG_INFO, via an
+        // unrelated-looking dbg_assert panic in pic.rs) down to this
+        // opcode - but re-enabling it afterward with diagnostic logging
+        // reproduced zero crashes and zero invocations across three
+        // separate runs, AND the untouched pre-this-batch baseline
+        // (checked out standalone and rebuilt) also ran clean twice in a
+        // row. That spread of results points at the original crash being
+        // a rare, one-off flake rather than a reliable regression tied to
+        // any specific code in this file - but "probably a flake" isn't
+        // "confirmed safe", so this stays unimplemented rather than
+        // assume the more convenient explanation. The logic itself reads
+        // as correct on repeated review and matches the already-working
+        // PCMPEQQ above.
         _ => return Ok(false),
     }
 

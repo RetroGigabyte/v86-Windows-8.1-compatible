@@ -140,6 +140,49 @@ time: any diagnostic that reads guest memory from inside exception/
 interrupt delivery needs to be scoped to exception vectors that are
 genuinely rare, not ones that fire during normal execution.
 
+### A second, probably-flaky "regression" - and a methodology lesson
+
+Separate from the HPET/WAET regression above: while extending the
+SSSE3/SSE4.1 batch further (PMOVSX/PMOVZX widening family, PMULDQ,
+PACKUSDW, PCMPGTQ), a single test run BSOD'd Windows 8.1 with
+`BAD_SYSTEM_CONFIG_INFO`. Bisected by disabling/re-enabling each new
+instruction individually and rerunning the full regression suite once
+per configuration - landed on `PCMPGTQ` as the apparent cause, shipped
+the other three, left `PCMPGTQ` unimplemented.
+
+Went back afterward to actually root-cause it (rather than leave an
+opaque "probably this one" note) by re-enabling `PCMPGTQ` with
+diagnostic logging on every invocation. Result across three separate
+reruns: **zero crashes, zero invocations logged at all** - the
+instruction was never even executed, let alone with data that could
+explain a crash. Widened the check further: checked out the untouched
+pre-batch file standalone, rebuilt, and ran the baseline twice more -
+also clean both times.
+
+Reading across all of it: one crash in roughly a dozen total runs
+(across the original full-batch tests, the per-instruction bisection,
+and these follow-up reruns), never reproduced despite deliberately
+trying to reproduce it under the exact configuration that "caused" it.
+That's a strong signal the original crash was a **rare, one-off flake**
+- possibly a genuine pre-existing, timing-sensitive v86 bug unrelated
+to any of this SSE work, possibly a Playwright/browser-environment
+artifact - rather than a deterministic regression caused by `PCMPGTQ`'s
+logic (which reads as correct on repeated review and matches the
+already-working `PCMPEQQ` right next to it).
+
+**The methodology lesson**: single-run bisection isn't reliable evidence
+on its own when the underlying failure might be nondeterministic - a
+one-shot bisection can point at an innocent change that merely happened
+to be present when a rare, unrelated bug fired. `PCMPGTQ` stays
+unimplemented regardless (a handful of clean reruns doesn't add up to
+"confirmed safe" either, just "failed to reproduce"), but the *reason*
+matters for how much confidence to put in tonight's other bisections
+too - the three shipped instructions (widening family, PMULDQ,
+PACKUSDW) each only saw one full-suite pass in isolation before being
+combined and shipped. Worth another rerun or two of the shipped build
+if this comes up again, just to build more confidence than a single
+clean pass provides.
+
 ### The second bug: a page that's never mapped, and likely why
 
 Traced via protected-mode fault-class exception logging (with disassembly
