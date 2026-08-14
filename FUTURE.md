@@ -678,6 +678,24 @@ supported range (e.g. 1024MB or exactly at the clamp boundary) instead
 of unknowingly running at a silently-clamped, non-round value the
 whole time — completely untested angle, about to try it now.
 
+**Retested — decisive result, but not the one hoped for.** Booted the
+identical `tiny10.img` with `memory_size=2047` (confirmed honored this
+time: `cpu.memory_size[0]` = 2,146,435,072 bytes, correctly under the
+clamp boundary, no silent rounding). This eliminates the RAM/PCI-hole
+overlap entirely — with RAM now genuinely topping out below 2GB,
+SeaBIOS's own `pcimem_start = 0x80000000` branch is the *correct* one
+to take, not an accidental miscalculation colliding with real memory.
+Ran the full 25 minutes past every previous stall point many times
+over. Result: **identical outcome** — stuck at the same boot logo, and
+the exact same fault (`cr2=0xf00100d4`) still fires. So the memory
+clamp bug is real, worth fixing on its own merits (it silently affects
+any user who configures 2GB+ RAM, completely independent of Windows
+10), but it is conclusively **not** the cause of this specific stall —
+removing the RAM/PCI-hole collision it was causing didn't change
+anything. Good to have this cleanly separated rather than left
+conflated: one confirmed-real, independently-valuable bug fix
+candidate, and the original mystery narrowed rather than solved.
+
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
 disassembly at the fault site (`call_interrupt_vector` in
