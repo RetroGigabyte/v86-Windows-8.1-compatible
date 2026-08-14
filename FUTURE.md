@@ -627,6 +627,57 @@ truth on its own — cross-check against QEMU (or real hardware docs)
 before trusting a flagged divergence, the way this one almost went
 the wrong way.
 
+**The big one: every test tonight silently ran with ~2GB of RAM, not
+2560MB as configured.** Went further than register-level comparison —
+used `iasl` (`brew install acpica`) to actually decompile v86's live
+SSDT and DSDT AML bytecode into readable ASL, something not attempted
+earlier tonight (the earlier SSDT-diff attempts were about comparing
+*byte content* against a reference; this is about reading what v86's
+*own* tables actually say). In the DSDT, the PCI0 host bridge's `_CRS`
+method reads external globals `P0S`/`P0E` (pcimem_start/pcimem_end) —
+defined in the SSDT as `Name (P0S, 0x80000000)`. That's 2GB. Checked
+SeaBIOS's actual branch logic for choosing that value
+(`src/fw/pciinit.c`): `if (RamSize <= 0x80000000) pcimem_start =
+0x80000000; else if (RamSize <= 0xc0000000) pcimem_start =
+0xc0000000;`. Our test config used `memory_size=2560` (MB) — 2560MB is
+*greater* than 2048MB, so this should have taken the second branch.
+It didn't, which meant SeaBIOS's view of `RamSize` had to be wrong.
+
+Checked directly, not inferred: dumped `cpu.memory_size[0]` from a live
+v86 instance configured with `memory_size=2560`. Actual value:
+`2,147,352,576` bytes — **2047.875 MB**, not 2560MB. Traced to the exact
+line: `CPU.prototype.create_memory` in `src/cpu.js`:
+
+```js
+else if((size | 0) < 0)
+{
+    size = Math.pow(2, 31) - MMAP_BLOCK_SIZE;
+    dbg_log("Rounding memory size down to " + size, LOG_CPU);
+}
+```
+
+`size | 0` coerces to a **signed** 32-bit integer. 2560MB
+(2,684,354,560 bytes) is above `2^31 - 1`, so it wraps negative,
+triggering this clamp — to `2^31 - MMAP_BLOCK_SIZE` =
+`2,147,352,576`, matching the observed value exactly. **v86 cannot
+actually run with 2GB or more of RAM at all** — any requested size at
+or above 2GB silently clamps to ~2047.875MB, with no error, no warning
+in the UI, nothing. Every single test run tonight (this investigation
+and probably a large fraction of everything logged in this document
+before tonight too, given `2560` has been the standard test config
+throughout) has been running on ~512MB less RAM than intended.
+
+This is deliberate, handled code — not an oversight in the sense of
+an unconsidered case — so whatever originally motivated capping memory
+below `2^31` (something downstream that needs sizes/addresses to fit
+in a signed 32-bit range without overflow) needs auditing before this
+limit can simply be raised; not attempting that blind tonight. But the
+immediate, cheap, valuable thing is retesting the Windows 10
+investigation with a memory size that's honestly *inside* the actual
+supported range (e.g. 1024MB or exactly at the clamp boundary) instead
+of unknowingly running at a silently-clamped, non-round value the
+whole time — completely untested angle, about to try it now.
+
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
 disassembly at the fault site (`call_interrupt_vector` in
