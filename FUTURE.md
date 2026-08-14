@@ -529,6 +529,33 @@ underlying SeaBIOS/`_CRS` investigation above remains the most promising
 unexplored thread; BIOS-swapping as a shortcut is now tried twice and
 closed both times.
 
+**A real, verified platform-timing gap — checked as a possible cause,
+turned out weaker than it first looked.** Comparing halfix's ACPI PM
+timer (`acpi_get_clock` in `src/hardware/acpi.c`: a direct scale of its
+own internal deterministic tick counter, always monotonic) against
+v86's (`ACPI.prototype.get_timer` in `src/acpi.js`) surfaced a real
+structural difference: v86's PM timer is driven by `v86.microtick()`,
+which is wall-clock based (`performance.now()`/`Date.now()`,
+`src/main.js`) — a browser-timing-precision constraint halfix (native,
+no such limit) doesn't have. To compensate, `get_timer` layers an
+"imprecision offset" hack on top that can genuinely **stall** (return a
+stale, non-advancing value across many consecutive reads) when polled
+faster than wall-clock time actually advances — confirmed live, not
+theoretical: booted `tiny10.img` under `debug.html` with full logging
+and counted **4,533** `"Overshot pmtimer, waiting"` warnings across a
+single boot. Initially looked like a smoking gun — a dense burst of ~35
+of them landed in the 80ms immediately before the fatal page fault —
+but breaking down the full log by 10ms bucket shows the rate is flat
+(30-70 occurrences per bucket) for the *entire* ~8-second window from
+first occurrence to the fault, not a spike specific to the fault.
+So this is chronic, steady-state behavior throughout this phase of
+boot, not a discrete trigger event immediately preceding the crash.
+Real, verified, and worth fixing on its own merits (a native
+deterministic-tick-driven PM timer, like halfix's, would remove an
+entire class of platform-timing inaccuracy v86 currently has) — but
+not confirmed as *the* cause of this specific fault. Worth keeping in
+mind as a contributing-factor candidate, not oversold as solved.
+
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
 disassembly at the fault site (`call_interrupt_vector` in
