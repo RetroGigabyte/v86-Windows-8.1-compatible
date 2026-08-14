@@ -434,6 +434,24 @@ way: swapping the whole BIOS trades one failure mode for a different,
 less informative one (no crash to analyze, no fault address to chase),
 it doesn't get Windows 10 running. Not pursuing further tonight.
 
+**That first Bochs BIOS test was flawed, though — retried properly.**
+`strings` on v86's actual vendored `bios/bochs-bios.bin` turns up *zero*
+ACPI-related content at all (no `FACP`/`DSDT`/`RSD PTR` strings) — this
+specific prebuilt binary has ACPI compiled out entirely, unlike halfix's
+own `bios.bin` (`strings` shows `FACP`, `DSDT`, `BXDSDT`, real
+table-construction code). So the first test wasn't "does a different
+BIOS's ACPI tables work better" — it was "what happens with *no* ACPI at
+all," a different and less useful question. Retried by swapping in
+halfix's actual `bios.bin`/`vgabios.bin` directly (backed up the
+originals first, restored them after). Result: same outcome — 13.5
+minutes, no crash, frozen at the identical boot logo the whole time.
+So even a real, ACPI-table-generating Bochs BIOS doesn't move the
+needle either. This rules out "just needed real ACPI tables from a
+different BIOS" more conclusively than the first attempt did. The
+underlying SeaBIOS/`_CRS` investigation above remains the most promising
+unexplored thread; BIOS-swapping as a shortcut is now tried twice and
+closed both times.
+
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
 disassembly at the fault site (`call_interrupt_vector` in
