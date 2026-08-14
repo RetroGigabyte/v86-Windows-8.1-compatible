@@ -274,6 +274,31 @@ progress. That two-fault handoff (read fault → one page compiled → total
 silence) is the concrete thing to trace next: what code is at
 `eip=0x815747fd`/nearby, and what it's spinning on.
 
+**Pinned the exact spin location.** Sampled the live debug panel
+(`cpu.get_regs_short()`, exposed by `debug.html`'s auto-refreshing
+`#debug_panel`) every 2 seconds for 30 seconds once the stall had set in.
+Every single register — including `esp`, `ebp`, `esi`, `edi`, and `eip`
+itself — was **bit-for-bit identical across all 15 samples**. Combined
+with the release build's steady ~700 mIPS the whole time, the only
+explanation that fits both facts is a tight, register-invariant loop
+(something like `jmp $`, or a poll loop whose body never changes any
+register) executing at full JIT speed — not a stale display and not a
+genuine CPU halt. Critically, **`if=0`**: interrupts are disabled the
+entire time. This is kernel code (`cpl=0`) spinning with interrupts
+masked, waiting on something that can only change via an interrupt it
+has itself turned off, or polling a device/memory flag that v86 never
+updates.
+
+Exact location, for whoever picks this up: **`cs:eip = 0x0008:0x813AB26A`**,
+`esp=0x81504FAC`, `ebp=0x8150539C`, `esi=0x80D15404`, `edi=0x81505314`,
+flags `p z` (parity+zero, `if=0`), `mode=prot/32 paging=1 pae=1 cpl=0`.
+The concrete next step is disassembling the instructions at that linear
+address (walk the current CR3 to translate `0x813AB26A`, then read and
+decode the bytes — the same `read_memory`-based approach used for the
+ACPI dump script, extended with page-table translation since this is a
+paged kernel address, not identity-mapped low memory) to find out
+exactly what it's waiting on.
+
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
 disassembly at the fault site (`call_interrupt_vector` in
