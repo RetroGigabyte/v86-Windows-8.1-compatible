@@ -109,6 +109,74 @@ unsafe fn instr_0F38_ssse3_sse41(sub_opcode: i32, modrm_byte: i32) -> OrPageFaul
     let md = modrm_byte >> 6 & 3;
     let rm = modrm_byte & 7;
 
+    // PMOVSX*/PMOVZX* (SSE4.1) have a narrower-than-m128 memory source
+    // (m16/m32/m64 depending on variant) - reading a full 128 bits for
+    // these would over-read past what the instruction actually needs and
+    // risk a spurious page fault on a page boundary right after a
+    // genuinely mapped, smaller region. Handled separately with a
+    // correctly-sized read instead of falling through to the generic
+    // m128 source read below.
+    match sub_opcode {
+        0x20 | 0x21 | 0x22 | 0x23 | 0x24 | 0x25 | 0x30 | 0x31 | 0x32 | 0x33 | 0x34 | 0x35 => {
+            let src64 = if md == 3 {
+                read_xmm64s(rm)
+            }
+            else {
+                let addr = modrm_resolve(modrm_byte)?;
+                let n_bytes = match sub_opcode {
+                    0x20 | 0x30 => 8, // BW: 8x i8 -> 8x i16
+                    0x21 | 0x31 => 4, // BD: 4x i8 -> 4x i32
+                    0x22 | 0x32 => 2, // BQ: 2x i8 -> 2x i64
+                    0x23 | 0x33 => 8, // WD: 4x i16 -> 4x i32
+                    0x24 | 0x34 => 4, // WQ: 2x i16 -> 2x i64
+                    0x25 | 0x35 => 8, // DQ: 2x i32 -> 2x i64
+                    _ => unreachable!(),
+                };
+                match n_bytes {
+                    2 => safe_read16(addr)? as u64,
+                    4 => safe_read32s(addr)? as u32 as u64,
+                    8 => safe_read64s(addr)?,
+                    _ => unreachable!(),
+                }
+            };
+            let src = src64.to_le_bytes();
+            let mut result = reg128 { i8: [0; 16] };
+            match sub_opcode {
+                0x20 => for i in 0..8 { result.i16[i] = src[i] as i8 as i16 },
+                0x21 => for i in 0..4 { result.i32[i] = src[i] as i8 as i32 },
+                0x22 => for i in 0..2 { result.i64[i] = src[i] as i8 as i64 },
+                0x23 => for i in 0..4 {
+                    let w = u16::from_le_bytes([src[2 * i], src[2 * i + 1]]) as i16;
+                    result.i32[i] = w as i32;
+                },
+                0x24 => for i in 0..2 {
+                    let w = u16::from_le_bytes([src[2 * i], src[2 * i + 1]]) as i16;
+                    result.i64[i] = w as i64;
+                },
+                0x25 => for i in 0..2 {
+                    let d = u32::from_le_bytes([src[4 * i], src[4 * i + 1], src[4 * i + 2], src[4 * i + 3]]) as i32;
+                    result.i64[i] = d as i64;
+                },
+                0x30 => for i in 0..8 { result.u16[i] = src[i] as u16 },
+                0x31 => for i in 0..4 { result.u32[i] = src[i] as u32 },
+                0x32 => for i in 0..2 { result.u64[i] = src[i] as u64 },
+                0x33 => for i in 0..4 {
+                    result.u32[i] = u16::from_le_bytes([src[2 * i], src[2 * i + 1]]) as u32;
+                },
+                0x34 => for i in 0..2 {
+                    result.u64[i] = u16::from_le_bytes([src[2 * i], src[2 * i + 1]]) as u64;
+                },
+                0x35 => for i in 0..2 {
+                    result.u64[i] = u32::from_le_bytes([src[4 * i], src[4 * i + 1], src[4 * i + 2], src[4 * i + 3]]) as u64;
+                },
+                _ => unreachable!(),
+            }
+            write_xmm_reg128(reg, result);
+            return Ok(true);
+        },
+        _ => {},
+    }
+
     let source = if md == 3 {
         read_xmm128s(rm)
     }
@@ -210,6 +278,36 @@ unsafe fn instr_0F38_ssse3_sse41(sub_opcode: i32, modrm_byte: i32) -> OrPageFaul
                 result.u32[i] = dest.u32[i].wrapping_mul(source.u32[i]);
             }
         },
+        0x28 => {
+            // PMULDQ: signed multiply of each lane's low dword, widened to
+            // a 64-bit product (not a full 32x32->64 of the whole lane).
+            for i in 0..2 {
+                result.i64[i] = dest.i32[2 * i] as i64 * source.i32[2 * i] as i64;
+            }
+        },
+        0x2B => {
+            // PACKUSDW: saturate dest's 4 dwords then source's 4 dwords to
+            // unsigned 16-bit each, concatenated into the 8 result words.
+            for i in 0..4 {
+                result.u16[i] = dest.i32[i].clamp(0, u16::MAX as i32) as u16;
+            }
+            for i in 0..4 {
+                result.u16[4 + i] = source.i32[i].clamp(0, u16::MAX as i32) as u16;
+            }
+        },
+        // PCMPGTQ (0x37) deliberately NOT implemented: bisected a real
+        // Windows 8.1 regression (BAD_SYSTEM_CONFIG_INFO, surfacing as an
+        // unrelated-looking dbg_assert panic in pic.rs, suggesting state
+        // corruption rather than a crash at the point of the bug) down to
+        // this specific opcode by disabling/re-enabling each new
+        // instruction in this batch one at a time and rerunning the full
+        // Windows 8.1 regression test. The widening family, PMULDQ, and
+        // PACKUSDW above are all confirmed clean this way. Root cause not
+        // found - the implementation looked correct on repeated review
+        // and follows the same pattern as the already-working PCMPEQQ
+        // just above. Left unimplemented (falls through to
+        // unimplemented_sse()) rather than ship something demonstrated
+        // unsafe without understanding why.
         _ => return Ok(false),
     }
 
