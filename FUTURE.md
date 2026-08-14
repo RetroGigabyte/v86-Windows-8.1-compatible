@@ -205,13 +205,44 @@ explains each gap precisely, not just generally:
   the ~40-byte WAET table body and expose it via a `fw_cfg` file the same
   way QEMU does.
 
-Both fixes are **bounded, addressable engineering tasks** — not a new
+Both looked like **bounded, addressable engineering tasks** — not a new
 chipset. (My earlier framing in this doc — "needs a whole new ICH9/q35
-chipset" — was too broad; scrap that, this is more precise and much
-cheaper to attempt.) Worth trying `HPET` first, since it's the simpler of
-the two (one device model, no `fw_cfg` mechanism needed) and is read
-unconditionally by SeaBIOS regardless of chipset — most likely to move the
-needle on its own.
+chipset" — was too broad; scrap that.) Here's what actually happened when
+both were implemented:
+
+- **`WAET`**: implemented as described (`build_waet_table()` in
+  `src/acpi.js`, exposed via a `fw_cfg` file named `acpi/waet` pushed into
+  `cpu.option_roms` in `src/cpu.js`). Confirmed via the same ACPI-dump
+  comparison that the table now appears (40 bytes, correct checksum,
+  matches QEMU's real `WAET`). **Regression-tested clean against Windows
+  8.1** — reaches the same "Getting devices ready" progress as the
+  pre-change baseline, no crash. Shipped.
+- **`HPET`**: implemented as described (full MMIO device model in
+  `src/hpet.js`, registered at `0xFED00000`, satisfying SeaBIOS's
+  `build_hpet()` validity checks). The ACPI table did start being emitted
+  correctly (56 bytes, matching QEMU's real `HPET` table exactly) — the
+  theory about *why* the table was missing was correct. **But it caused a
+  real regression**: Windows 8.1, which boots cleanly without it, now
+  BSODs partway through boot with `STOP 0x0000005C`
+  (`HAL_INITIALIZATION_FAILED`). Bisected by toggling `HPET`/`WAET`
+  independently and rebuilding between each run — confirmed `HPET` alone
+  is the cause (`WAET` alone is clean). Most likely explanation: this
+  implementation's timers are stored but never wired to the IOAPIC (see
+  the comment in the now-removed `src/hpet.js`), so if the HAL picks HPET
+  as a timer source and enables legacy-replacement routing, it hangs
+  waiting for an interrupt that will never fire, and eventually gives up.
+  Actually wiring timer interrupts through would be a materially bigger
+  task than "add a device model" — **reverted, not shipped**. If picking
+  this up again, the interrupt routing is the part that needs solving, not
+  the register/table plumbing (that part already works).
+
+With `WAET` alone in place, the "second Windows 10 bug" above was
+retested (`tiny10.img`, 4 minutes past the ~50s stall point): CPU speed
+stayed active and non-zero throughout (previously all activity stopped
+dead at the stall), but the boot animation itself never progressed past
+the spinning logo in that window either. Inconclusive — better than
+before, not confirmed fixed. Worth a longer unattended run before
+concluding anything.
 
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with

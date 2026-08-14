@@ -15,7 +15,7 @@ import { h, view, pads, Bitmap, dump_file } from "./lib.js";
 import { dbg_assert, dbg_log } from "./log.js";
 
 import { SB16 } from "./sb16.js";
-import { ACPI } from "./acpi.js";
+import { ACPI, build_waet_table } from "./acpi.js";
 import { PIT } from "./pit.js";
 import { DMA } from "./dma.js";
 import { UART } from "./uart.js";
@@ -1166,6 +1166,8 @@ CPU.prototype.init = function(settings, device_bus)
         if(this.acpi_enabled[0])
         {
             this.devices.acpi = new ACPI(this);
+
+            this.option_roms.push({ name: "acpi/waet", data: build_waet_table() });
         }
 
         this.devices.rtc = new RTC(this);

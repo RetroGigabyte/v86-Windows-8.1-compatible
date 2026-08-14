@@ -214,3 +214,48 @@ ACPI.prototype.set_state = function(state)
     this.pm1_enable = state[2];
     this.gpe = state[3];
 };
+
+// Builds the ACPI WAET (Windows ACPI Emulated devices Table). SeaBIOS
+// rel-1.16.2 has no code to generate this table itself (real QEMU builds
+// it and injects it via fw_cfg, which SeaBIOS picks up through its
+// "acpi/*" romfile loader in acpi_setup() - see src/fw/acpi.c). Telling
+// Windows both the RTC and ACPI PM timer are "good" lets it skip some
+// legacy timer-calibration workarounds during boot.
+export function build_waet_table()
+{
+    const WAET_RTC_GOOD = 1 << 0;
+    const WAET_ACPI_PM_GOOD = 1 << 1;
+
+    const length = 36 + 4;
+    const table = new Uint8Array(length);
+    const view = new DataView(table.buffer);
+
+    write_str(table, 0, "WAET");
+    view.setUint32(4, length, true);
+    table[8] = 1; // revision
+    table[9] = 0; // checksum, filled in below
+    write_str(table, 10, "BOCHS ");
+    write_str(table, 16, "BXPCWAET");
+    view.setUint32(24, 1, true); // OEM revision
+    write_str(table, 28, "BXPC");
+    view.setUint32(32, 1, true); // creator revision
+
+    view.setUint32(36, WAET_RTC_GOOD | WAET_ACPI_PM_GOOD, true);
+
+    let sum = 0;
+    for(let i = 0; i < length; i++)
+    {
+        sum += table[i];
+    }
+    table[9] = (-sum) & 0xFF;
+
+    return table;
+}
+
+function write_str(bytes, offset, str)
+{
+    for(let i = 0; i < str.length; i++)
+    {
+        bytes[offset + i] = str.charCodeAt(i);
+    }
+}
