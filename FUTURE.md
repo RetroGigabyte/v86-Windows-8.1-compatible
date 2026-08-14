@@ -116,6 +116,30 @@ instruction:
   exact same wall**, with no ESD decompression to blame — confirming this
   is a second, real, still-open bug, not just slowness.
 
+### A regression along the way, worth knowing about
+
+The diagnostic tracing used to investigate the second bug (below) itself
+caused a real, serious bug at one point: it called `safe_read8()` — a real
+memory access with page-walk side effects — from inside
+`call_interrupt_vector` on every occurrence of a wide set of exception
+vectors, including `#PF` (14), which fires constantly during completely
+normal Windows execution (demand paging). This risked triggering a *nested*
+fault while already handling one, and was confirmed via regression testing
+to crash Windows 8.1 (the previously verified-working baseline) with
+`Maximum call stack size exceeded` — recursive
+`trigger_pagefault → call_interrupt_vector → do_page_walk →
+trigger_pagefault`, instead of reaching the desktop.
+
+Fixed by narrowing that diagnostic back to vector 8 (double fault) only —
+rare enough to log safely — and dropping the byte-disassembly that
+required the unsafe reads in the first place. **The finding below was
+re-verified after this fix**, with the corrupting diagnostic removed: the
+second bug still reproduces identically, confirming it's a real, separate
+issue and not an artifact of the regression. Worth remembering for next
+time: any diagnostic that reads guest memory from inside exception/
+interrupt delivery needs to be scoped to exception vectors that are
+genuinely rare, not ones that fire during normal execution.
+
 ### The second bug: a page that's never mapped, and likely why
 
 Traced via protected-mode fault-class exception logging (with disassembly
