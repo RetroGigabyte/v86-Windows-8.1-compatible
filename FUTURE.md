@@ -923,6 +923,20 @@ retransmission continued unchanged. That rules out injection timing as
 the problem — the issue really is the protocol bytes themselves, not
 an infrastructure artifact.
 
+With cheap iteration now confirmed (each attempt takes seconds, no VM
+reboot needed), tried two more small, well-reasoned variations before
+stopping for real: (A) the same leader as data packets (`0x30303030`)
+instead of the control-packet leader (`0x69696969`), still matching
+`PacketId`; (B) the control leader with `PacketId=0` fixed instead of
+echoing the data packet's ID (some KD implementations use a constant
+ID for control packets). Both clean negatives, same unchanged
+retransmission. Four total variants tried, all negative — this is
+where guessing genuinely stops being productive; the remaining
+plausible variations (checksum computation, a required prior RESET
+exchange, a completely different control-packet structure) aren't
+small tweaks anymore, they're different enough that trying them without
+a specification is just noise.
+
 Deliberately **stopped here** rather than keep guessing field-by-field
 with no way to verify against a real specification — that's a
 recipe for burning a lot more time without confidence in the result,
