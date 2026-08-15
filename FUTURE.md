@@ -1033,6 +1033,21 @@ everything else found tonight — the parking loop has genuinely been
 running for nearly the entire 5 minutes sampled, not just recently
 before the stall was first noticed.
 
+**That sharpens the timeline, not just confirms a loop.** A single CR3
+for the *entire* window — including all the visible disk/ACPI activity
+tracked earlier tonight — means no user-mode process is ever created
+during any of it: not `smss.exe`, not `csrss.exe`, nothing. Everything
+observed happens inside one long-lived kernel-mode context. That puts
+the actual failure very early in NT's Phase 1 kernel initialization —
+plausibly during the kernel's own first PnP/HAL resource-assignment
+pass, well before Session Manager ever gets to run — rather than
+somewhere later, closer to the GUI/logon-manager stage the animated
+boot logo might otherwise suggest. Worth keeping in mind for anyone
+picking this up with real symbols: the relevant code is almost
+certainly deep in `ntoskrnl.exe`'s early init path or the PnP/PCI
+enumeration that runs as part of it, not in a later-loading driver or
+service.
+
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
 disassembly at the fault site (`call_interrupt_vector` in
