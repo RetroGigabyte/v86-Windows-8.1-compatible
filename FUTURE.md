@@ -6,6 +6,46 @@ future me) doesn't have to re-derive the reasoning from scratch.
 
 ## Windows 10 (32-bit)
 
+> **TL;DR for whoever picks this up next** (the section below is a long,
+> chronological investigation log — start here, not there):
+>
+> - Windows 10 stalls at the boot logo. Root cause: Windows page-faults
+>   on a fixed address (`0xF0010000+`) whose page-directory entry is
+>   genuinely never populated, then parks the CPU in an infinite
+>   `jmp $` with interrupts masked. Confirmed **not** the disk, the OS,
+>   the firmware code, or a corrupted install — real QEMU (matched
+>   chipset, and separately with v86's *exact* vendored `seabios.bin`)
+>   boots the identical disk to desktop. This is a genuine, narrow
+>   v86-specific gap.
+> - **Real bugs found and fixed along the way** (independently valuable,
+>   none of them turned out to be the actual cause): the ACPI PM timer
+>   could stall under fast polling (fixed, ported the same fix already
+>   used for TSC); the PCI Command register silently dropped 32-bit
+>   writes (fixed, narrow consistency fix); v86 silently clamps RAM to
+>   ~2047.875MB regardless of configured size — confirmed real, **not**
+>   fixed (see "Extended the audit further" below for why it's not a
+>   quick patch), and confirmed **not** the Windows 10 cause either
+>   (retested with honestly-configured memory, identical stall).
+> - **Real breakthrough, not yet finished**: kernel debugging (WinDbg
+>   protocol) is now actually reachable. A BCD-patched copy of the disk
+>   (`tiny10-windbg.img`, edited via Docker + `ntfs-3g` + `hivexsh` —
+>   full recipe below) produces real, confirmed `KD_PACKET` traffic over
+>   v86's emulated COM1, bridged to a plain TCP port
+>   (`debug-artifacts/v86_serial_bridge.js`) that any real KD client
+>   could attach to. A real packet is captured
+>   (`debug-artifacts/kd_capture.bin`). One hand-reasoned ACK attempt
+>   didn't complete the handshake — needs either real WinDbg or a
+>   protocol implementation checked against actual documentation, not
+>   more guessing. This is the most promising open thread.
+> - Dead ends, confirmed closed (not just "didn't get to it"): SSDT/`_CRS`
+>   byte-diff against real QEMU (QEMU has deferred to its own `fw_cfg`
+>   ACPI generation over loaded firmware for 5+ years, confirmed back to
+>   QEMU 5.2 via Docker); swapping SeaBIOS for Bochs BIOS/ROMBIOS (tried
+>   twice, including with halfix's actual ACPI-enabled binary); PCI BAR
+>   misconfiguration; IOAPIC/APIC interrupt-delivery and EOI logic (read
+>   closely, matches spec); PIT/RTC timing code (structurally safe,
+>   no analog to the PM-timer bug).
+
 Windows 10 doesn't need a new architecture feature the way 11 does — v86's
 32-bit CPU, PAE, and (with this fork) NX bit support already cover the hard
 requirements. The blockers are narrower but there are likely several of them:
