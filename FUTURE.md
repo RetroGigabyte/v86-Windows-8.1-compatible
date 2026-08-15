@@ -9,14 +9,24 @@ future me) doesn't have to re-derive the reasoning from scratch.
 > **TL;DR for whoever picks this up next** (the section below is a long,
 > chronological investigation log — start here, not there):
 >
-> - Windows 10 stalls at the boot logo. Root cause: Windows page-faults
->   on a fixed address (`0xF0010000+`) whose page-directory entry is
->   genuinely never populated, then parks the CPU in an infinite
->   `jmp $` with interrupts masked. Confirmed **not** the disk, the OS,
->   the firmware code, or a corrupted install — real QEMU (matched
->   chipset, and separately with v86's *exact* vendored `seabios.bin`)
->   boots the identical disk to desktop. This is a genuine, narrow
->   v86-specific gap.
+> - Windows 10 stalls at the boot logo. Windows page-faults on a fixed
+>   address (`0xF0010000+`) whose page-directory entry is never
+>   populated, then parks the CPU in an infinite `jmp $` with interrupts
+>   masked. Confirmed **not** the disk, the OS, the firmware code, or a
+>   corrupted install — real QEMU (matched chipset, and separately with
+>   v86's *exact* vendored `seabios.bin`) boots the identical disk to
+>   desktop. **Refined the framing of the bug itself**: surveyed the
+>   guest's page tables across the *entire* PCI hole
+>   (`0xE0000000`-`0xFFC00000`) and found nothing pre-mapped anywhere in
+>   it — expected, correct behavior (unclaimed PCI space isn't supposed
+>   to be pre-mapped). So this isn't "Windows forgot to map this
+>   address" (a static config question); it's that something accesses
+>   this address directly assuming a mapping exists, without first going
+>   through whatever on-demand step (`MmMapIoSpace` or equivalent) should
+>   create it — and that step fails silently or never runs, only on v86.
+>   That's a dynamic driver-behavior question, not a static one — which
+>   is exactly what the kernel-debugging thread below is positioned to
+>   answer, once it's completed.
 > - **Real bugs found and fixed along the way** (independently valuable,
 >   none of them turned out to be the actual cause): the ACPI PM timer
 >   could stall under fast polling (fixed, ported the same fix already
