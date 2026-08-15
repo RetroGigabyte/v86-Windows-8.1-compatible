@@ -728,6 +728,68 @@ anything. Good to have this cleanly separated rather than left
 conflated: one confirmed-real, independently-valuable bug fix
 candidate, and the original mystery narrowed rather than solved.
 
+**Real breakthrough: WinDbg kernel debugging is now actually
+achievable, and confirmed working end-to-end.** The macOS-side blocker
+from earlier in this session (no working NTFS write path — `mount_ntfs`
+absent, `ntfs-3g` won't build on macOS, macFUSE alone doesn't solve it)
+turned out to have a clean solution: Docker. `docker run --privileged`
+gives a real Linux container with working loop devices, `kpartx` to
+expose partitions, and genuine `ntfs-3g` read-write support (Linux's
+native target). Concretely, on a **copy** of `tiny10.img` (never the
+original — `cp -c` for a cheap APFS clone):
+
+1. `losetup -fP disk.img`, `kpartx -av /dev/loop0` → exposes
+   `/dev/mapper/loop0p1` (boot/BCD partition) and `loop0p2` (Windows).
+2. Both partitions come up NTFS-dirty (Windows Fast Startup leaves this
+   state even after an apparently clean shutdown) — `ntfs-3g` refuses
+   read-write mount until fixed. `ntfsfix /dev/mapper/loop0pN` clears
+   it (note: this discards the fast-startup hibernation state, which is
+   fine — we don't want to resume it anyway).
+3. Used `hivexsh` (from `libhivex-bin`) to edit the BCD hive directly —
+   NOT `bcdedit.exe` itself: tried running the real `bcdedit.exe` from
+   the mounted image under Wine first, but that fails outright (Wine
+   can't satisfy real Windows System32 binaries' dependencies on real
+   NT DLLs like `api-ms-win-core-console-l1-2-0.dll` — this only works
+   for normal Wine-hosted applications, not system tools tightly
+   coupled to real NT internals). `hivexsh -w` (write mode) with `add`
+   (create key) / `setval` (write value) / `commit` worked cleanly.
+4. Found the default OS loader object via the Boot Manager's
+   `{9dea862c-5cdd-4e70-acc1-f32b344d4795}\Elements\23000003` (a single
+   GUID value) — landed on `{2486a71f-9773-11f1-9fd8-b7be162b8c63}` for
+   this image. Created element `260000a0` (`KernelDebuggerEnabled`)
+   there with an 8-byte-aligned `REG_BINARY` value `01` (matching the
+   format of existing boolean-ish elements in the same store).
+5. First boot with only that change showed **zero** serial activity at
+   all — turned out the pre-existing Global Debug Settings object
+   (`{4636856e-540f-4170-a130-a84776f4c654}\Elements\15000011`, value
+   `4`) was set to `LOCAL` debug type (confirmed indirectly: extracted
+   strings from the real `bcdedit.exe` on the image —
+   `strings -el bcdedit.exe | grep -i serial` — which lists the CLI's
+   own debugtype enum as `SERIAL, 1394, USB, NET, LOCAL`; `LOCAL`
+   doesn't touch any physical transport at all, which fits the total
+   silence perfectly). Changed that element to `0` (`SERIAL`) instead —
+   didn't add explicit debugport/baudrate elements, since `bcdedit`
+   defaults to COM1/115200 when unspecified.
+6. Rebooted the patched image under v86's debug build with the
+   existing `LOG_SERIAL` logging (`src/uart.js`) enabled (checkbox id
+   is actually `log_seri`, not `seri` — auto-generated as
+   `"log_" + name.toLowerCase()` in `src/browser/main.js`). **Real
+   kernel-debugger protocol traffic appeared**: literal readable
+   fragments including `"KDTARGET: Refreshing KD connection"` and
+   `"\SystemRoot\system32\ntoskrnl.exe"`, repeating — Windows actively
+   retrying a KD handshake with no debugger yet listening on the other
+   end, exactly the expected behavior.
+
+This is a real, working, reproducible kernel-debug channel — not yet
+turned into an actual interactive WinDbg session (that needs something
+on the *other* end of v86's emulated COM1 speaking the KD protocol
+back, which nothing does yet). The concrete next step is bridging
+v86's UART to something a real debugger can attach to — check
+`src/uart.js`/`src/browser/serial.js` for whether v86 already exposes
+the emulated serial port over a real transport (WebSocket, TCP) that
+a host-side tool could connect to, since that's the remaining piece
+between "confirmed reachable" and "actually usable."
+
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
 disassembly at the fault site (`call_interrupt_vector` in
