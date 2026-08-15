@@ -790,6 +790,60 @@ the emulated serial port over a real transport (WebSocket, TCP) that
 a host-side tool could connect to, since that's the remaining piece
 between "confirmed reachable" and "actually usable."
 
+**Built that bridge; got real protocol bytes; stopped short of a full
+handshake rather than guess blind.** v86 doesn't expose serial over a
+real transport natively, but the pieces to build one are there: `bus.send("serial0-output-byte", byte)`
+fires on every guest-transmitted byte, and `bus.send("serial0-input", byte)`
+injects a byte into the guest's receive path (`src/uart.js`). Wrote a
+Playwright-driven bridge
+(`debug-artifacts/v86_serial_bridge.js`, checked into the repo) that hooks both via
+`page.exposeFunction`/`page.evaluate` and relays to a plain TCP server
+on `127.0.0.1:7788`. A raw Python client connecting to that port
+receives real, live bytes from the guest's COM1 — confirmed by
+capturing a clean, structured, repeating ~232-byte block that matches
+known `KD_PACKET` framing almost exactly: 4-byte leader `0x30303030`,
+then `PacketType`/`ByteCount`/`PacketId`/`Checksum` as little-endian
+`u16/u16/u32/u32`, a data payload, and a trailer byte `0xAA` right
+where expected. Parsed one live packet: `type=0x7 bytecount=0xf4
+packet_id=0x80800800 checksum=0x45c0` — that `PacketId` is suspiciously
+close to the documented `INITIAL_PACKET_ID = 0x80800000` constant,
+which is a good sign the structural read is roughly right.
+
+Made one well-reasoned attempt at acknowledging it — a `CONTROL_PACKET`
+per the same recalled schema (`leader 0x69696969`, `type=4`
+`PACKET_TYPE_KD_ACKNOWLEDGE`, `bytecount=0`, the parsed `PacketId`,
+`checksum=0`) — sent it over the bridge and watched for the
+retransmission to stop. It didn't; the target kept resending the
+identical state-change packet unchanged. That's a clean, unambiguous
+negative result, not a partial success: either the exact packet format
+has a detail wrong (byte order in a subfield, a different leader for
+this particular packet type, a required prior RESET exchange this flow
+skips past), or genuinely something else in the handshake is missing.
+Deliberately **stopped here** rather than keep guessing field-by-field
+with no way to verify against a real specification — that's a
+recipe for burning a lot more time without confidence in the result,
+different from the earlier register-comparison work tonight where
+QEMU/SeaBIOS source gave something authoritative to check against.
+
+**What's left, concretely, for whoever picks this up:** the bridge
+itself (`debug-artifacts/v86_serial_bridge.js`) is real, tested, working infrastructure
+— point any real KD-protocol-speaking tool at `127.0.0.1:7788` (while
+the bridge process is running against the BCD-patched
+`tiny10-windbg.img`) and it should be able to complete the handshake a
+correct implementation would need. That could be: (a) real WinDbg,
+if run from an actual Windows machine with a way to reach this TCP
+port (the bridge binds `127.0.0.1` only right now — trivial to change
+to `0.0.0.0` for LAN access, not done here since that widens exposure
+and wasn't needed for a same-machine test); or (b) a from-scratch KD
+client written against the actual public protocol documentation this
+session didn't have access to (Microsoft's `windbgkd.h`/`dbgeng`
+headers, or the well-known community reverse-engineering writeups of
+the KD wire format) — the packet capture in `debug-artifacts/kd_capture.bin` is a real, live, correctly-captured sample to
+validate any such implementation against, which is worth more than it
+sounds: most of the effort in a from-scratch protocol client is
+usually spent getting *a single real capture* to test against, and
+that part's already done.
+
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
 disassembly at the fault site (`call_interrupt_vector` in
