@@ -710,6 +710,47 @@ limit without a real, complete audit — flagging the two checked
 call sites so a future attempt doesn't have to re-derive them, but the
 audit itself is still open.
 
+**Extended the audit further, and it points at a different, more
+complete explanation than "code assumes signed addresses."** Checked
+the Rust core's most heavily-used memory-access API —
+`safe_read8`/`safe_write32`/etc. throughout `src/rust/cpu/cpu.rs` —
+and confirmed they *do* take `addr: i32` (signed) pervasively. Initial
+read: "there's the reason." Closer look rules that out as the actual
+constraint on `memory_size` specifically: these functions handle
+**virtual/linear** addresses, not physical RAM size directly, and this
+entire session has exercised virtual addresses well above `0x80000000`
+correctly all night without incident (every Windows kernel EIP value
+traced tonight — `0x813...` and similar — is itself above 2GB; that's
+normal, kernel-space is the upper half of a flat 32-bit address space
+regardless of how much RAM is configured). A bit pattern is a bit
+pattern; `i32` vs `u32` only matters where code does a signed
+*comparison* or *shift*, not for round-tripping the value itself, and
+none of the flagged usages here showed that failure mode.
+
+The clamp's actual chosen value — `2^31 - MMAP_BLOCK_SIZE`, suspiciously
+close to "2GB minus a hair" — points somewhere more mundane: browser/
+wasm-engine memory allocation limits. `wasm32` (not `memory64`) has a
+hard 4GB linear-memory ceiling by spec, but individual JS engines have
+historically capped a single `WebAssembly.Memory` well below that —
+V8 (Chromium/Node, what this project is tested against) has had
+various practical ceilings around the 2-4GB range depending on version
+and platform. No explicit `--max-memory`-style flag exists in this
+repo's `Makefile`, so if that's the real reason, it was chosen
+empirically by the original author rather than pinned to a build
+setting anywhere greppable — consistent with not finding it in the
+two code paths already checked.
+
+If true, this reframes what raising the limit actually requires: not
+"fix code that mishandles large signed addresses" (no evidence that's
+real) but "verify current V8/browser wasm-memory limits actually
+support more than ~2GB reliably, and raise the clamp to whatever that
+new safe ceiling is" — a different, more empirical kind of validation
+(cross-browser/engine testing) than a code audit, and one this
+environment can only partially do (only Chromium via Playwright is
+available here, not the full range of browsers/versions v86 users
+might run). Still not attempting the fix — the *category* of what's
+needed is clearer now, but "clearer" isn't "verified."
+
 **Retested — decisive result, but not the one hoped for.** Booted the
 identical `tiny10.img` with `memory_size=2047` (confirmed honored this
 time: `cpu.memory_size[0]` = 2,146,435,072 bytes, correctly under the
