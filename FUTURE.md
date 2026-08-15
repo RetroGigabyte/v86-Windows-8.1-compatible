@@ -1013,15 +1013,25 @@ So the precise statement isn't "nothing above RAM is ever mapped" —
 it's specifically the *declared PCI hole* (`0xE0000000` and up, matching
 `pcimem_start`/`pcimem_end` from the SSDT) that's entirely empty, while
 a few other fixed regions closer to RAM's top are successfully mapped
-by *something*. Worth flagging as unresolved rather than explained:
-this single-`CR3` snapshot can't distinguish "these are legitimately
-different, unrelated mappings" from "some of this is process-specific
-and a different `CR3` would show a different picture" — multi-`CR3`
-comparison (sampling a few different active process contexts, not just
-whichever one happens to be current when the stall is sampled) is a
-real, doable next step this session didn't get to, and would clarify
-whether kernel-space mappings above RAM are actually consistent across
-processes here the way they should be.
+by *something*.
+
+**Followed up on the multi-`CR3` question directly.** Sampled `CR3`
+every 5 seconds for 5 minutes straight, from very early in boot through
+well past the stall point. Result: **exactly one distinct `CR3` value
+the entire time** (`0x1a8000`) — it never changes. That actually
+resolves the "is this process-specific" concern by NT design, not by
+more data needed: kernel-space page directory entries (which is what
+`0xE0000000+` addresses are — the upper half of a flat 32-bit space) are
+synchronized across every process's page directory specifically so
+kernel code sees consistent state no matter which process is current.
+A different active `CR3` wouldn't show a different picture for a
+kernel-space address; checking one is representative of all of them
+here. The single unchanging `CR3` is itself informative in a different
+way, though: it means either this stayed in one long-lived kernel-only
+context for the whole window, or — more likely, consistent with
+everything else found tonight — the parking loop has genuinely been
+running for nearly the entire 5 minutes sampled, not just recently
+before the stall was first noticed.
 
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
