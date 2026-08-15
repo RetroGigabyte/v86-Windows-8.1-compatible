@@ -1002,6 +1002,27 @@ map it on demand not run or not succeed" (a dynamic, driver-behavior
 question — squarely the kind of thing kernel debugging, not more static
 analysis, would actually answer).
 
+**One more precision correction on the survey above.** Extended it
+downward into the gap between configured RAM's actual ceiling
+(`memory_size=2047MB` → real top around `0x7ff80000`) and the start of
+the declared PCI hole. That region isn't uniformly empty either: three
+small mapped stretches exist *above* physical RAM but *below*
+`0xE0000000` — `0x80e00000`-`0x83600000`, `0x83800000`-`0x83a00000`,
+and `0xc0000000`-`0xc0800000` — surrounded by large unmapped gaps.
+So the precise statement isn't "nothing above RAM is ever mapped" —
+it's specifically the *declared PCI hole* (`0xE0000000` and up, matching
+`pcimem_start`/`pcimem_end` from the SSDT) that's entirely empty, while
+a few other fixed regions closer to RAM's top are successfully mapped
+by *something*. Worth flagging as unresolved rather than explained:
+this single-`CR3` snapshot can't distinguish "these are legitimately
+different, unrelated mappings" from "some of this is process-specific
+and a different `CR3` would show a different picture" — multi-`CR3`
+comparison (sampling a few different active process contexts, not just
+whichever one happens to be current when the stall is sampled) is a
+real, doable next step this session didn't get to, and would clarify
+whether kernel-space mappings above RAM are actually consistent across
+processes here the way they should be.
+
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
 disassembly at the fault site (`call_interrupt_vector` in
