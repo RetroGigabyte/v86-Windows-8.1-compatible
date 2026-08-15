@@ -33,10 +33,13 @@ future me) doesn't have to re-derive the reasoning from scratch.
 >   v86's emulated COM1, bridged to a plain TCP port
 >   (`debug-artifacts/v86_serial_bridge.js`) that any real KD client
 >   could attach to. A real packet is captured
->   (`debug-artifacts/kd_capture.bin`). One hand-reasoned ACK attempt
->   didn't complete the handshake — needs either real WinDbg or a
->   protocol implementation checked against actual documentation, not
->   more guessing. This is the most promising open thread.
+>   (`debug-artifacts/kd_capture.bin`). Two well-reasoned ACK attempts
+>   (including ruling out injection timing as a confound — fixed the
+>   bridge to batch-inject instead of one byte per round-trip, retried,
+>   same clean negative result) didn't complete the handshake — needs
+>   either real WinDbg or a protocol implementation checked against
+>   actual documentation, not more guessing. This is the most promising
+>   open thread.
 > - Dead ends, confirmed closed (not just "didn't get to it"): SSDT/`_CRS`
 >   byte-diff against real QEMU (QEMU has deferred to its own `fw_cfg`
 >   ACPI generation over loaded firmware for 5+ years, confirmed back to
@@ -900,6 +903,26 @@ negative result, not a partial success: either the exact packet format
 has a detail wrong (byte order in a subfield, a different leader for
 this particular packet type, a required prior RESET exchange this flow
 skips past), or genuinely something else in the handshake is missing.
+
+**Ruled out one real alternative explanation before giving up on it.**
+The original bridge injected incoming bytes one at a time, each via its
+own `page.evaluate()` round-trip (real CDP latency per byte) — a
+legitimate concern that the guest's packet reassembly could have some
+inter-byte timeout the injection was blowing past, independent of
+whether the packet bytes themselves were correct. Fixed the bridge to
+batch an entire incoming write into a single `page.evaluate()` call
+that loops *inside* the page context (`window.__serialInjectBytes`,
+now in the committed `debug-artifacts/v86_serial_bridge.js`) —
+effectively instantaneous injection instead of per-byte round-trips.
+Restarted the VM fresh, captured a new live packet
+(`type=0x7 bytecount=0x112 packet_id=0x80800800` — same type and
+`PacketId` as before, different `bytecount`, consistent with a
+different KASLR layout on this particular boot, nothing alarming), and
+sent the identical ACK format again. Same clean negative result:
+retransmission continued unchanged. That rules out injection timing as
+the problem — the issue really is the protocol bytes themselves, not
+an infrastructure artifact.
+
 Deliberately **stopped here** rather than keep guessing field-by-field
 with no way to verify against a real specification — that's a
 recipe for burning a lot more time without confidence in the result,

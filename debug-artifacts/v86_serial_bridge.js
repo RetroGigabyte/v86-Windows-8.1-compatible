@@ -42,10 +42,17 @@ const TCP_PORT = 7788;
     await page.waitForTimeout(1000);
 
     // Hook the bus: forward every outgoing byte to our exposed function,
-    // and stash a way to inject incoming bytes from the TCP side.
+    // and stash a way to inject incoming bytes from the TCP side. Inject
+    // takes an array and loops *inside* the page context, so an entire
+    // packet goes in with a single CDP round-trip instead of one await
+    // per byte - important because per-byte round-trip latency could
+    // easily exceed whatever inter-byte timeout the guest's UART/packet
+    // reassembly logic expects.
     await page.evaluate(() => {
-        window.__serialInject = (byte) => {
-            window.emulator.bus.send('serial0-input', byte);
+        window.__serialInjectBytes = (bytes) => {
+            for (const byte of bytes) {
+                window.emulator.bus.send('serial0-input', byte);
+            }
         };
         window.emulator.bus.register('serial0-output-byte', (byte) => {
             window.onSerialOutputByte(byte);
@@ -62,9 +69,7 @@ const TCP_PORT = 7788;
             socket.write(Buffer.from([outgoingQueue.shift()]));
         }
         socket.on('data', async (data) => {
-            for (const byte of data) {
-                await page.evaluate((b) => window.__serialInject(b), byte);
-            }
+            await page.evaluate((bytes) => window.__serialInjectBytes(bytes), Array.from(data));
         });
         socket.on('close', () => {
             logLine('TCP client disconnected.');
