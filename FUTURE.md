@@ -962,6 +962,36 @@ sounds: most of the effort in a from-scratch protocol client is
 usually spent getting *a single real capture* to test against, and
 that part's already done.
 
+**A genuinely different angle, and a real refinement of the mental
+model: surveyed the page tables directly instead of just confirming
+the one known PDE is zero.** Walked the guest's own page directory
+(via `cpu.cr[3]` and `emu.read_memory`, same technique used
+throughout tonight, entirely read-only/zero-risk) across the *entire*
+declared PCI hole (`0xE0000000`-`0xFFC00000`, ~480MB) at 2MB
+granularity, at the stall point. Result: **every single entry across
+the whole range has no PDE at all** — not a spotty pattern, not "one
+resource forgotten," nothing in that ~480MB window is pre-mapped,
+anywhere. A finer 4KB-granularity pass right around the known fault
+address confirms the same down to page granularity.
+
+This matters because it rules out the framing this investigation had
+been implicitly using ("Windows forgot to map *this* address"). Real
+hardware/Windows correctly does *not* pre-map unclaimed PCI space —
+that's expected, standard behavior, not a bug. So the actual gap isn't
+"a resource that should already be mapped isn't" — it's that **something
+accesses an address in this region directly, assuming a mapping
+already exists, without first going through whatever on-demand
+resource-claiming step (`MmMapIoSpace` or equivalent) would normally
+create that mapping right before the access.** That claiming step
+either fails silently or never executes on v86, while the equivalent
+succeeds on real hardware/QEMU (already established: identical disk,
+identical firmware, boots fine there). This narrows the search from
+"why is this specific address unmapped" (a static ACPI/config question,
+mostly exhausted tonight) to "why does the code path that's supposed to
+map it on demand not run or not succeed" (a dynamic, driver-behavior
+question — squarely the kind of thing kernel debugging, not more static
+analysis, would actually answer).
+
 If picking this up again: the diagnostic infrastructure is still in place
 and reusable — protected-mode-only fault-class exception logging with
 disassembly at the fault site (`call_interrupt_vector` in
