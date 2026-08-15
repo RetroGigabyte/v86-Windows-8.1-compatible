@@ -26,7 +26,14 @@ future me) doesn't have to re-derive the reasoning from scratch.
 >   create it — and that step fails silently or never runs, only on v86.
 >   That's a dynamic driver-behavior question, not a static one — which
 >   is exactly what the kernel-debugging thread below is positioned to
->   answer, once it's completed.
+>   answer, once it's completed. **Also sharpened the timeline**: `CR3`
+>   never changes across a full 5-minute sample spanning early boot
+>   through well past the stall, meaning no user-mode process (not
+>   `smss.exe`, nothing) is ever created — this fails very early in NT's
+>   Phase 1 kernel init, likely the kernel's own first PnP/HAL resource
+>   pass, not anywhere close to the GUI/logon stage the animated logo
+>   might suggest. Point any future symbol-equipped debugging at
+>   `ntoskrnl.exe`'s early init path first.
 > - **Real bugs found and fixed along the way** (independently valuable,
 >   none of them turned out to be the actual cause): the ACPI PM timer
 >   could stall under fast polling (fixed, ported the same fix already
